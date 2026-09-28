@@ -1,0 +1,21 @@
+{
+  "name": "famiminmax",
+  "version": "1.0.0",
+  "description": "Famiminmax — consultation et adaptation des minimums rayon via scan TC26",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "verif": "node scripts/verif-fichiers.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "exceljs": "^4.4.0",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "pg-mem": "^3.0.3"
+  }
+}

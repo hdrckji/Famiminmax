@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<meta name="theme-color" content="#245D39" />
+<title>Famiminmax — Minimums rayon</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  /* ---- Charte graphique Famiflora : donkergroen #245D39 / lichtgroen #80BA27, Rubik ---- */
+  :root{
+    --donkergroen:#245D39;--lichtgroen:#80BA27;--lichtgroen-bg:#E6F0D7;
+    --bg:var(--lichtgroen-bg);--card:#fff;--card-2:#fbfdf6;
+    --ink:var(--donkergroen);--ink-soft:#5c7a67;
+    --rouge:#c1465a;--rouge-bg:#ffe4e3;
+    --bord:#c9dab3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Rubik",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.45;
+    -webkit-tap-highlight-color:transparent}
+  header{background:var(--donkergroen);color:#fff;padding:10px 14px;display:flex;align-items:baseline;gap:10px;
+    position:sticky;top:0;z-index:10}
+  header h1{font-size:19px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin:0}
+  header .sous{font-size:12px;color:#cfe6a0;font-weight:500}
+  main{max-width:560px;margin:0 auto;padding:12px 12px 90px}
+
+  /* Zone scan */
+  .scan{display:flex;gap:8px;margin-bottom:12px}
+  .scan input{flex:1;font:inherit;font-size:18px;font-weight:500;padding:13px 14px;border-radius:12px;
+    border:2px solid var(--bord);background:#fff;color:var(--ink);min-width:0}
+  .scan input:focus{outline:none;border-color:var(--lichtgroen);box-shadow:0 0 0 3px #cfe6a066}
+  .scan button{font:inherit;font-size:20px;padding:0 16px;border-radius:12px;border:2px solid var(--bord);
+    background:#fff;color:var(--ink);cursor:pointer}
+  .scan button.actif{background:var(--lichtgroen);border-color:var(--donkergroen);color:#12321f}
+
+  .msg{padding:12px 14px;border-radius:12px;font-size:15px;margin-bottom:12px}
+  .msg.err{background:var(--rouge-bg);border:2px solid var(--rouge);color:#9c3547;font-weight:500}
+  .msg.info{background:#fff;border:2px solid var(--bord);color:var(--ink-soft)}
+
+  /* Choix multi-produits */
+  .choix button{display:block;width:100%;text-align:left;font:inherit;padding:12px 14px;margin-bottom:8px;
+    border-radius:12px;border:2px solid var(--bord);background:#fff;cursor:pointer}
+  .choix .code{font-size:12px;color:var(--ink-soft)}
+
+  /* Fiche produit */
+  .fiche{background:var(--card);border:2px solid var(--bord);border-radius:16px;padding:16px;margin-bottom:12px}
+  .fiche h2{margin:0 0 2px;font-size:19px;font-weight:700;line-height:1.25}
+  .fiche .ref{font-size:12.5px;color:var(--ink-soft);margin-bottom:12px}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:6px}
+  .stat{background:var(--card-2);border:1.5px solid var(--bord);border-radius:12px;padding:8px 6px;text-align:center}
+  .stat b{display:block;font-size:22px;font-weight:800;line-height:1.15}
+  .stat span{font-size:10.5px;color:var(--ink-soft);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
+  .stat.min{background:var(--donkergroen);border-color:var(--donkergroen)}
+  .stat.min b{color:#fff}
+  .stat.min span{color:#cfe6a0}
+  .stat.alerte{background:var(--rouge-bg);border-color:var(--rouge)}
+  .stat.alerte b{color:#9c3547}
+  .contexte{font-size:12.5px;color:var(--ink-soft);margin:6px 2px 0}
+
+  /* Graphique ventes */
+  .ventes{background:var(--card);border:2px solid var(--bord);border-radius:16px;padding:14px 16px;margin-bottom:12px}
+  .ventes h3{margin:0 0 10px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft)}
+  .graph{display:flex;align-items:flex-end;gap:8px;height:110px}
+  .col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%}
+  .col .val{font-size:13px;font-weight:700;margin-bottom:3px}
+  .col .tot{font-size:9.5px;color:var(--ink-soft)}
+  .col .barre{width:100%;max-width:44px;background:linear-gradient(180deg,var(--lichtgroen),#96c93f);
+    border:1.5px solid var(--donkergroen);border-radius:6px 6px 0 0;min-height:3px}
+  .col.vide .barre{background:#eef3e4;border-color:var(--bord)}
+  .col .sem{font-size:10.5px;color:var(--ink-soft);margin-top:5px;font-weight:500;text-align:center;line-height:1.2}
+  .ventes .aucune{color:var(--ink-soft);font-size:13.5px}
+
+  /* Proposition */
+  .proposer{background:var(--card);border:2px solid var(--bord);border-radius:16px;padding:16px;margin-bottom:12px}
+  .proposer h3{margin:0 0 10px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft)}
+  .encours{background:var(--lichtgroen-bg);border:1.5px solid var(--lichtgroen);border-radius:10px;
+    padding:9px 12px;font-size:13.5px;margin-bottom:12px}
+  .stepper{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .stepper button{width:56px;height:56px;font-size:28px;font-weight:700;border-radius:14px;cursor:pointer;
+    border:2px solid var(--donkergroen);background:#fff;color:var(--donkergroen)}
+  .stepper button:active{background:var(--lichtgroen-bg)}
+  .stepper input{flex:1;text-align:center;font-family:inherit;font-size:30px;font-weight:800;padding:8px;
+    border-radius:14px;border:2px solid var(--bord);color:var(--ink);min-width:0}
+  .proposer textarea,.proposer .auteur{width:100%;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+    border:2px solid var(--bord);background:#fff;color:var(--ink);margin-bottom:10px}
+  .proposer textarea{resize:none;height:64px}
+  .btn-valider{width:100%;font:inherit;font-size:17px;font-weight:700;padding:15px;border-radius:14px;cursor:pointer;
+    background:linear-gradient(180deg,#96c93f 0%,var(--lichtgroen) 70%,var(--donkergroen) 100%);
+    color:#12321f;border:2px solid var(--donkergroen);box-shadow:3px 3px 0 var(--donkergroen)}
+  .btn-valider:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--donkergroen)}
+  .btn-valider:disabled{opacity:.55}
+
+  /* Toast */
+  #toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(90px);z-index:50;
+    background:var(--donkergroen);color:#fff;font-weight:600;font-size:15px;padding:13px 22px;border-radius:14px;
+    transition:transform .25s;max-width:92vw;text-align:center}
+  #toast.visible{transform:translateX(-50%) translateY(0)}
+  #toast.err{background:var(--rouge)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Famiminmax</h1>
+  <span class="sous">Minimums rayon</span>
+</header>
+<main>
+  <form class="scan" id="formScan" autocomplete="off">
+    <input id="champScan" inputmode="none" placeholder="Scannez un code-barres…" autofocus
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
+    <button type="button" id="btnClavier" title="Saisie manuelle">⌨</button>
+  </form>
+  <div id="zone">
+    <p class="msg info">Scannez l'étiquette d'un produit pour afficher son minimum rayon et ses ventes des 5 dernières semaines.</p>
+  </div>
+</main>
+<div id="toast"></div>
+
+<script>
+'use strict';
+const champ = document.getElementById('champScan');
+const zone = document.getElementById('zone');
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+
+function toast(msg, err) {
+  toastEl.textContent = msg;
+  toastEl.className = 'visible' + (err ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.className = ''; }, 2600);
+}
+
+function ech(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Le TC26 scanne en mode clavier : on garde le focus sur le champ,
+// clavier virtuel masqué par défaut (bouton ⌨ pour la saisie manuelle).
+const btnClavier = document.getElementById('btnClavier');
+btnClavier.addEventListener('click', () => {
+  const manuel = champ.getAttribute('inputmode') === 'none';
+  champ.setAttribute('inputmode', manuel ? 'text' : 'none');
+  btnClavier.classList.toggle('actif', manuel);
+  champ.blur(); champ.focus();
+});
+function refocus() { setTimeout(() => { champ.focus(); champ.select(); }, 60); }
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refocus(); });
+
+document.getElementById('formScan').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const code = champ.value.trim();
+  if (code) chercher(code);
+});
+
+async function chercher(code) {
+  zone.innerHTML = '<p class="msg info">Recherche…</p>';
+  try {
+    const rep = await fetch('/api/produit?code=' + encodeURIComponent(code));
+    const data = await rep.json();
+    if (!rep.ok) { zone.innerHTML = '<p class="msg err">' + ech(data.erreur) + '</p>'; refocus(); return; }
+    if (data.choix) { afficherChoix(data.choix); refocus(); return; }
+    afficherFiche(data);
+  } catch {
+    zone.innerHTML = '<p class="msg err">Serveur injoignable. Vérifiez le réseau et réessayez.</p>';
+  }
+  refocus();
+}
+
+function afficherChoix(choix) {
+  zone.innerHTML = '<p class="msg info">Plusieurs produits partagent ce code-barres :</p><div class="choix">' +
+    choix.map((c) =>
+      '<button data-code="' + ech(c.codeArticle) + '"><b>' + ech(c.description) + '</b><br>' +
+      '<span class="code">Article ' + ech(c.codeArticle) + ' · EAN ' + ech(c.ean) + '</span></button>'
+    ).join('') + '</div>';
+  zone.querySelectorAll('.choix button').forEach((b) =>
+    b.addEventListener('click', () => chercher(b.dataset.code)));
+}
+
+function libSemaine(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  const fin = new Date(d); fin.setDate(fin.getDate() + 6);
+  const f = (x) => String(x.getDate()).padStart(2, '0') + '/' + String(x.getMonth() + 1).padStart(2, '0');
+  return f(d) + '<br>au ' + f(fin);
+}
+
+function afficherFiche(data) {
+  const p = data.produit;
+  const maxV = Math.max(1, ...data.ventes.map((v) => v.qteFami));
+  const stockAlerte = p.stock < p.stockMin;
+
+  let graph;
+  if (!data.ventes.length) {
+    graph = '<p class="aucune">Aucune semaine de ventes importée pour le moment.</p>';
+  } else {
+    graph = '<div class="graph">' + data.ventes.map((v) => {
+      const h = Math.max(3, Math.round((v.qteFami / maxV) * 72));
+      const tot = v.qteTotale !== v.qteFami ? '<span class="tot">tot. ' + v.qteTotale + '</span>' : '';
+      return '<div class="col' + (v.qteFami === 0 ? ' vide' : '') + '">' +
+        '<span class="val">' + v.qteFami + '</span>' + tot +
+        '<div class="barre" style="height:' + h + 'px"></div>' +
+        '<span class="sem">' + libSemaine(v.semaine) + '</span></div>';
+    }).join('') + '</div>';
+  }
+
+  const prop = data.proposition;
+  const valeurInitiale = prop ? prop.minPropose : p.stockMin;
+  const enCours = prop
+    ? '<div class="encours">💡 Proposition en cours : <b>' + prop.minPropose + '</b>' +
+      (prop.auteur ? ' (par ' + ech(prop.auteur) + ')' : '') +
+      (prop.exportee ? ' — déjà exportée' : ' — pas encore exportée') + '</div>'
+    : '';
+
+  zone.innerHTML =
+    '<div class="fiche">' +
+      '<h2>' + ech(p.description) + '</h2>' +
+      '<div class="ref">Article ' + ech(p.codeArticle) + ' · EAN ' + ech(p.ean || '—') +
+        (p.fournisseur ? ' · ' + ech(p.fournisseur) : '') + '</div>' +
+      '<div class="stats">' +
+        '<div class="stat min"><b>' + p.stockMin + '</b><span>Min rayon</span></div>' +
+        '<div class="stat' + (stockAlerte ? ' alerte' : '') + '"><b>' + p.stock + '</b><span>Stock</span></div>' +
+        '<div class="stat"><b>' + p.stockMax + '</b><span>Max</span></div>' +
+        '<div class="stat"><b>' + (p.vpe == null ? '—' : p.vpe) + '</b><span>VPE</span></div>' +
+      '</div>' +
+      (p.vk12 != null ? '<p class="contexte">Ventes 12 derniers mois (VK-12) : <b>' + p.vk12 + '</b></p>' : '') +
+    '</div>' +
+    '<div class="ventes"><h3>Ventes Fami · 5 dernières semaines</h3>' + graph + '</div>' +
+    '<div class="proposer"><h3>Proposer une adaptation du minimum</h3>' + enCours +
+      '<div class="stepper">' +
+        '<button type="button" id="moins">−</button>' +
+        '<input id="nouveauMin" type="number" min="0" max="100000" step="1" value="' + valeurInitiale + '" />' +
+        '<button type="button" id="plus">+</button>' +
+      '</div>' +
+      '<textarea id="commentaire" maxlength="500" placeholder="Commentaire (facultatif)"></textarea>' +
+      '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (facultatif)" />' +
+      '<button class="btn-valider" id="valider">Envoyer la proposition</button>' +
+    '</div>';
+
+  const nouveauMin = document.getElementById('nouveauMin');
+  const pas = p.vpe && p.vpe > 1 ? p.vpe : 1;
+  document.getElementById('moins').addEventListener('click', () => {
+    nouveauMin.value = Math.max(0, (parseInt(nouveauMin.value, 10) || 0) - pas); refocus();
+  });
+  document.getElementById('plus').addEventListener('click', () => {
+    nouveauMin.value = (parseInt(nouveauMin.value, 10) || 0) + pas; refocus();
+  });
+
+  const auteur = document.getElementById('auteur');
+  auteur.value = localStorage.getItem('famiminmax_auteur') || '';
+
+  document.getElementById('valider').addEventListener('click', async () => {
+    const btn = document.getElementById('valider');
+    const min = parseInt(nouveauMin.value, 10);
+    if (!Number.isInteger(min) || min < 0) { toast('Minimum invalide.', true); return; }
+    localStorage.setItem('famiminmax_auteur', auteur.value.trim());
+    btn.disabled = true;
+    try {
+      const rep = await fetch('/api/proposition', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codeArticle: p.codeArticle,
+          minPropose: min,
+          commentaire: document.getElementById('commentaire').value,
+          auteur: auteur.value,
+        }),
+      });
+      const data2 = await rep.json();
+      if (!rep.ok) throw new Error(data2.erreur || 'Erreur serveur.');
+      toast('✓ Proposition enregistrée : min ' + min);
+      chercher(p.codeArticle);
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+    }
+  });
+  refocus();
+}
+</script>
+</body>
+</html>

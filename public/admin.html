@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme-color" content="#245D39" />
+<title>Famiminmax — Administration</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --donkergroen:#245D39;--lichtgroen:#80BA27;--lichtgroen-bg:#E6F0D7;
+    --bg:var(--lichtgroen-bg);--card:#fff;--card-2:#fbfdf6;
+    --ink:var(--donkergroen);--ink-soft:#5c7a67;
+    --rouge:#c1465a;--rouge-bg:#ffe4e3;--bord:#c9dab3;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Rubik",system-ui,sans-serif;background:var(--bg);color:var(--ink);line-height:1.5}
+  header{background:var(--donkergroen);color:#fff;padding:12px 20px;display:flex;align-items:baseline;gap:12px}
+  header h1{font-size:20px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin:0}
+  header .sous{font-size:13px;color:#cfe6a0}
+  header a{margin-left:auto;color:#cfe6a0;font-size:13px}
+  main{max-width:1080px;margin:0 auto;padding:18px 16px 60px}
+  h2{font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);margin:22px 0 10px}
+  .cartes{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+  .carte{background:var(--card);border:2px solid var(--bord);border-radius:14px;padding:14px 16px}
+  .carte b.gros{font-size:30px;font-weight:800;display:block;line-height:1.2}
+  .carte .det{font-size:12.5px;color:var(--ink-soft)}
+  .carte ul{margin:6px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--ink-soft)}
+  .carte li b{color:var(--ink)}
+  input[type=file],input[type=date]{font:inherit;font-size:13.5px;padding:8px;border-radius:9px;border:2px solid var(--bord);background:#fff;max-width:100%}
+  .btn{font:inherit;font-size:14px;font-weight:700;padding:10px 18px;border-radius:11px;cursor:pointer;
+    background:linear-gradient(180deg,#96c93f 0%,var(--lichtgroen) 70%,var(--donkergroen) 100%);
+    color:#12321f;border:2px solid var(--donkergroen);box-shadow:2px 2px 0 var(--donkergroen)}
+  .btn:active{transform:translate(1px,1px);box-shadow:1px 1px 0 var(--donkergroen)}
+  .btn:disabled{opacity:.55;cursor:default}
+  .btn.secondaire{background:#fff;color:var(--donkergroen)}
+  .btn.danger{background:#fff;color:var(--rouge);border-color:var(--rouge);box-shadow:none;font-weight:500;padding:6px 10px;font-size:12.5px}
+  .ligne-form{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:8px}
+  .resultat{font-size:13.5px;margin-top:10px;padding:9px 12px;border-radius:9px;display:none}
+  .resultat.ok{display:block;background:var(--lichtgroen-bg);border:1.5px solid var(--lichtgroen)}
+  .resultat.err{display:block;background:var(--rouge-bg);border:1.5px solid var(--rouge);color:#9c3547}
+  table{width:100%;border-collapse:collapse;background:#fff;border:2px solid var(--bord);border-radius:14px;overflow:hidden;font-size:13.5px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #dcead0;vertical-align:top}
+  th{background:var(--donkergroen);color:#fff;font-weight:600;font-size:12.5px;letter-spacing:.03em}
+  tr:nth-child(even) td{background:var(--card-2)}
+  .fleche{font-weight:800;white-space:nowrap}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:99px}
+  .badge.nouvelle{background:var(--lichtgroen);color:#12321f}
+  .badge.exportee{background:#e4e9df;color:var(--ink-soft)}
+  #porte{max-width:400px;margin:80px auto;background:#fff;border:2px solid var(--bord);border-radius:16px;padding:24px;text-align:center}
+  #porte input{width:100%;font:inherit;font-size:16px;padding:11px;border-radius:10px;border:2px solid var(--bord);margin:12px 0;text-align:center}
+  .vide{color:var(--ink-soft);font-size:13.5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Famiminmax</h1>
+  <span class="sous">Administration</span>
+  <a href="/">→ page scan</a>
+</header>
+
+<div id="porte" style="display:none">
+  <b>Code d'accès admin</b>
+  <input id="codeAdmin" type="password" placeholder="Code d'accès" />
+  <button class="btn" id="btnEntrer">Entrer</button>
+  <p class="resultat err" id="porteErr" style="margin-top:10px">Code invalide.</p>
+</div>
+
+<main id="contenu" style="display:none">
+  <h2>État de la plateforme</h2>
+  <div class="cartes">
+    <div class="carte"><b class="gros" id="nbProduits">—</b>articles au référentiel<div class="det" id="majProduits"></div></div>
+    <div class="carte"><b class="gros" id="nbSemaines">—</b>semaines de ventes<ul id="listeSemaines"></ul></div>
+    <div class="carte"><b class="gros" id="nbNouvelles">—</b>propositions à exporter<div class="det" id="detProp"></div></div>
+  </div>
+
+  <h2>1 · Importer le fichier des minimums rayon</h2>
+  <div class="carte">
+    <div class="det">Export ERP type « Beta4 » (feuille Export). Remplace tout le référentiel produits — à refaire chaque semaine ou après modification des minimums dans l'ERP.</div>
+    <div class="ligne-form">
+      <input type="file" id="fichierMin" accept=".xlsx" />
+      <button class="btn" id="btnImportMin">Importer</button>
+    </div>
+    <div class="resultat" id="resMin"></div>
+  </div>
+
+  <h2>2 · Importer les ventes d'une semaine</h2>
+  <div class="carte">
+    <div class="det">Export hebdomadaire agrégé (Artikelnummer / Aantal). Choisissez le <b>lundi</b> de la semaine concernée ; réimporter la même semaine remplace ses données.</div>
+    <div class="ligne-form">
+      <input type="file" id="fichierVentes" accept=".xlsx" />
+      <label>Semaine du lundi <input type="date" id="dateSemaine" /></label>
+      <button class="btn" id="btnImportVentes">Importer</button>
+    </div>
+    <div class="resultat" id="resVentes"></div>
+  </div>
+
+  <h2>3 · Propositions d'adaptation</h2>
+  <div class="ligne-form" style="margin-bottom:10px">
+    <button class="btn" id="btnExportNouvelles">⬇ Exporter les nouvelles (Excel)</button>
+    <button class="btn secondaire" id="btnExportToutes">Tout exporter</button>
+    <span class="det" id="resExport"></span>
+  </div>
+  <div id="tableProp"></div>
+</main>
+
+<script>
+'use strict';
+let codeAdmin = localStorage.getItem('famiminmax_admin') || '';
+
+function entetes(extra) {
+  return Object.assign({ 'X-Admin-Code': codeAdmin }, extra || {});
+}
+
+async function appel(url, options) {
+  const rep = await fetch(url, Object.assign({}, options, { headers: entetes(options && options.headers) }));
+  if (rep.status === 401) { montrerPorte(true); throw new Error('Code admin requis.'); }
+  return rep;
+}
+
+function montrerPorte(erreur) {
+  document.getElementById('contenu').style.display = 'none';
+  document.getElementById('porte').style.display = 'block';
+  document.getElementById('porteErr').style.display = erreur && codeAdmin ? 'block' : 'none';
+}
+
+async function demarrer() {
+  try {
+    const rep = await fetch('/api/etat', { headers: entetes() });
+    if (rep.status === 401) { montrerPorte(codeAdmin !== ''); return; }
+    document.getElementById('porte').style.display = 'none';
+    document.getElementById('contenu').style.display = 'block';
+    afficherEtat(await rep.json());
+    chargerPropositions();
+  } catch {
+    montrerPorte(false);
+  }
+}
+
+document.getElementById('btnEntrer').addEventListener('click', () => {
+  codeAdmin = document.getElementById('codeAdmin').value.trim();
+  localStorage.setItem('famiminmax_admin', codeAdmin);
+  demarrer();
+});
+document.getElementById('codeAdmin').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btnEntrer').click();
+});
+
+function fdate(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('fr-BE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+function fdatetime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleString('fr-BE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+function ech(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function afficherEtat(etat) {
+  document.getElementById('nbProduits').textContent = etat.produits.nb.toLocaleString('fr-BE');
+  document.getElementById('majProduits').textContent = etat.produits.majLe ? 'Dernier import : ' + fdatetime(etat.produits.majLe) : 'Aucun import pour le moment.';
+  document.getElementById('nbSemaines').textContent = etat.semaines.length;
+  document.getElementById('listeSemaines').innerHTML = etat.semaines.slice(0, 5).map((s) => {
+    const fin = new Date(s.debut + 'T12:00:00'); fin.setDate(fin.getDate() + 6);
+    return '<li>Du <b>' + fdate(s.debut + 'T12:00:00') + '</b> au <b>' + fdate(fin.toISOString()) + '</b> — ' + s.nbLignes + ' articles</li>';
+  }).join('');
+  document.getElementById('nbNouvelles').textContent = etat.propositions.nouvelles || 0;
+  document.getElementById('detProp').textContent = etat.propositions.total + ' proposition(s) au total';
+}
+
+// Lundi de la semaine passée par défaut
+(function () {
+  const d = new Date();
+  const jour = (d.getDay() + 6) % 7; // 0 = lundi
+  d.setDate(d.getDate() - jour - 7);
+  document.getElementById('dateSemaine').value = d.toISOString().slice(0, 10);
+})();
+
+function afficherResultat(id, ok, texte) {
+  const el = document.getElementById(id);
+  el.className = 'resultat ' + (ok ? 'ok' : 'err');
+  el.textContent = texte;
+}
+
+async function importer(idFichier, url, idRes, bouton) {
+  const input = document.getElementById(idFichier);
+  if (!input.files.length) { afficherResultat(idRes, false, 'Choisissez d’abord un fichier .xlsx.'); return null; }
+  bouton.disabled = true;
+  afficherResultat(idRes, true, 'Import en cours…');
+  try {
+    const rep = await appel(url, { method: 'POST', body: await input.files[0].arrayBuffer() });
+    const data = await rep.json();
+    if (!rep.ok) throw new Error(data.erreur || 'Erreur serveur.');
+    return data;
+  } catch (e) {
+    afficherResultat(idRes, false, e.message);
+    return null;
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+document.getElementById('btnImportMin').addEventListener('click', async (e) => {
+  const data = await importer('fichierMin', '/api/import/minimums', 'resMin', e.target);
+  if (data) {
+    afficherResultat('resMin', true, '✓ ' + data.nbArticles.toLocaleString('fr-BE') + ' articles importés, dont ' +
+      data.nbAvecMin.toLocaleString('fr-BE') + ' avec un minimum > 0.' +
+      (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
+    demarrer();
+  }
+});
+
+document.getElementById('btnImportVentes').addEventListener('click', async (e) => {
+  const semaine = document.getElementById('dateSemaine').value;
+  if (!semaine) { afficherResultat('resVentes', false, 'Choisissez le lundi de la semaine.'); return; }
+  const d = new Date(semaine + 'T12:00:00');
+  if ((d.getDay() + 6) % 7 !== 0) { afficherResultat('resVentes', false, 'La date choisie n’est pas un lundi.'); return; }
+  const nomFichier = document.getElementById('fichierVentes').files.length
+    ? document.getElementById('fichierVentes').files[0].name : '';
+  const data = await importer('fichierVentes',
+    '/api/import/ventes?semaine=' + semaine + '&fichier=' + encodeURIComponent(nomFichier), 'resVentes', e.target);
+  if (data) {
+    afficherResultat('resVentes', true, '✓ Semaine du ' + fdate(semaine + 'T12:00:00') + ' : ' +
+      data.nbLignes.toLocaleString('fr-BE') + ' articles, ' + data.nbPieces.toLocaleString('fr-BE') + ' pièces vendues.' +
+      (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
+    demarrer();
+  }
+});
+
+async function chargerPropositions() {
+  const rep = await appel('/api/propositions');
+  const { propositions } = await rep.json();
+  const cible = document.getElementById('tableProp');
+  if (!propositions.length) {
+    cible.innerHTML = '<p class="vide">Aucune proposition pour le moment. Elles apparaîtront ici dès que les collègues scanneront en magasin.</p>';
+    return;
+  }
+  cible.innerHTML = '<table><thead><tr><th>Article</th><th>Description</th><th>Minimum</th><th>Commentaire</th><th>Auteur</th><th>Quand</th><th>Statut</th><th></th></tr></thead><tbody>' +
+    propositions.map((p) =>
+      '<tr><td>' + ech(p.codeArticle) + '</td>' +
+      '<td>' + ech(p.description) + (p.fournisseur ? '<br><span class="det" style="font-size:11.5px;color:var(--ink-soft)">' + ech(p.fournisseur) + '</span>' : '') + '</td>' +
+      '<td class="fleche">' + p.minActuel + ' → ' + p.minPropose + '</td>' +
+      '<td>' + ech(p.commentaire || '') + '</td>' +
+      '<td>' + ech(p.auteur || '—') + '</td>' +
+      '<td>' + fdatetime(p.majLe) + '</td>' +
+      '<td><span class="badge ' + (p.exportee ? 'exportee' : 'nouvelle') + '">' + (p.exportee ? 'exportée' : 'nouvelle') + '</span></td>' +
+      '<td><button class="btn danger" data-code="' + ech(p.codeArticle) + '">✕</button></td></tr>'
+    ).join('') + '</tbody></table>';
+  cible.querySelectorAll('button[data-code]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Supprimer la proposition pour l’article ' + b.dataset.code + ' ?')) return;
+      await appel('/api/proposition-suppr?codeArticle=' + encodeURIComponent(b.dataset.code), { method: 'POST' });
+      demarrer();
+    }));
+}
+
+async function exporter(mode) {
+  const info = document.getElementById('resExport');
+  info.textContent = 'Génération…';
+  try {
+    const rep = await appel('/api/export?mode=' + mode);
+    if (rep.status === 404) { info.textContent = 'Aucune proposition à exporter.'; return; }
+    if (!rep.ok) throw new Error('Erreur serveur.');
+    const blob = await rep.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (rep.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'adaptations.xlsx';
+    a.click();
+    URL.revokeObjectURL(url);
+    info.textContent = '✓ Fichier téléchargé.';
+    demarrer();
+  } catch (e) {
+    info.textContent = e.message;
+  }
+}
+document.getElementById('btnExportNouvelles').addEventListener('click', () => exporter('nouvelles'));
+document.getElementById('btnExportToutes').addEventListener('click', () => exporter('toutes'));
+
+demarrer();
+</script>
+</body>
+</html>
