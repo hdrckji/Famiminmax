@@ -20,6 +20,8 @@ async function fabriquerMinimums() {
   const ws = wb.addWorksheet('Export');
   ws.addRow(['Article', 'Description', 'VK-12', 'Stock (de marchandise)', 'Minimale Stock', 'Maximale Stock',
     'Récolte', 'VPE', 'PA', 'Fournisseur', 'N°decommande.', 'EAN barcode']);
+  // Doublon de code article (cas réel dans Beta4) : la dernière ligne doit gagner
+  ws.addRow(['57913', 'Goudspray 150ml (ancien)', '248', '124', '96', '132', '0', '12', '1.16', 'Goodmark Europe NV', '022280', '5410764216374']);
   ws.addRow(['57913', 'Goudspray 150ml', '248', '124', '120', '132', '0', '12', '1.16', 'Goodmark Europe NV', '022280', '5410764216374']);
   ws.addRow(['61702', 'Gazebo Lemax', '9', '5', '6', '12', '0', '1', '7.27', 'Lemax BV', 'L-99', '0728162041609']);
   ws.addRow(['99001', 'Article sans EAN', '0', '2', '0', '0', '0', '1', '2', 'Divers', '', '']);
@@ -61,9 +63,10 @@ test('import du fichier minimums', async () => {
   const rep = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
-  assert.strictEqual(data.nbArticles, 4);
+  assert.strictEqual(data.nbArticles, 4); // le doublon 57913 est dédupliqué
   assert.strictEqual(data.nbAvecMin, 3);
-  assert.match(data.avertissements[0] || '', /sans EAN/);
+  assert.ok(data.avertissements.some((a) => /doublon/.test(a)), 'avertissement doublons attendu');
+  assert.ok(data.avertissements.some((a) => /sans EAN/.test(a)), 'avertissement sans EAN attendu');
 });
 
 test('import des ventes de deux semaines', async () => {
