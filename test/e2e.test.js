@@ -179,9 +179,21 @@ test('export Excel des nouvelles propositions puis marquage', async () => {
   await wb.xlsx.load(Buffer.from(await rep.arrayBuffer()));
   const ws = wb.getWorksheet('Adaptations');
   assert.strictEqual(ws.rowCount, 2); // entête + 1 proposition
-  assert.strictEqual(ws.getRow(2).getCell(1).value, '57913');
-  assert.strictEqual(ws.getRow(2).getCell(6).value, 108);
-  assert.strictEqual(ws.getRow(2).getCell(7).value, -12); // écart 108 - 120
+  // Ligne A au format d'import ERP
+  assert.deepStrictEqual(ws.getRow(1).values.slice(1, 10),
+    ['artikelnummer', 'minimale voorraad', 'Omschrijving', 'Magazijn', 'eanbarcode',
+      'BestelNr.', 'afname', 'maximale voorraad', 'gereserveerde voorraad']);
+  const ligne = ws.getRow(2);
+  assert.strictEqual(ligne.getCell(1).value, '57913'); // artikelnummer
+  assert.strictEqual(ligne.getCell(2).value, 108); // minimale voorraad = min proposé
+  assert.strictEqual(ligne.getCell(4).value, 'Fami'); // Magazijn
+  assert.strictEqual(ligne.getCell(5).value, '5410764216374'); // eanbarcode
+  assert.strictEqual(ligne.getCell(6).value, '022280'); // BestelNr.
+  assert.strictEqual(ligne.getCell(7).value, 12); // afname = VPE
+  assert.strictEqual(ligne.getCell(8).value, 132); // maximale voorraad
+  assert.strictEqual(ligne.getCell(9).value, 0); // gereserveerde voorraad
+  assert.strictEqual(ligne.getCell(10).value, 120); // min actuel (vue d'ensemble)
+  assert.strictEqual(ligne.getCell(11).value, -12); // écart 108 - 120
 
   // Plus rien de nouveau à exporter
   const vide = await api('/api/export?mode=nouvelles', { headers: ADMIN });

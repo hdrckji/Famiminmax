@@ -269,7 +269,7 @@ async function apiExport(req, res, url) {
   const mode = url.searchParams.get('mode') === 'toutes' ? 'toutes' : 'nouvelles';
   const filtre = mode === 'nouvelles' ? 'WHERE pr.exporte_le IS NULL' : '';
   const r = await db.requete(
-    `SELECT pr.*, p.fournisseur
+    `SELECT pr.*, p.fournisseur, p.num_commande, p.vpe, p.stock_max
        FROM propositions pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ${filtre}
       ORDER BY pr.maj_le DESC`
