@@ -59,6 +59,12 @@
   .stat.alerte{background:var(--rouge-bg);border-color:var(--rouge)}
   .stat.alerte b{color:#9c3547}
   .contexte{font-size:12.5px;color:var(--ink-soft);margin:6px 2px 0}
+  .badge-inactif{display:inline-block;vertical-align:middle;margin-left:8px;font-size:11px;font-weight:700;
+    letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:99px;
+    background:var(--rouge-bg);color:#9c3547;border:1.5px solid var(--rouge)}
+  .badge-actif{display:inline-block;vertical-align:middle;margin-left:8px;font-size:11px;font-weight:600;
+    letter-spacing:.04em;text-transform:uppercase;padding:2px 9px;border-radius:99px;
+    background:var(--lichtgroen-bg);color:var(--donkergroen);border:1.5px solid var(--lichtgroen)}
 
   /* Graphique ventes */
   .ventes{background:var(--card);border:2px solid var(--bord);border-radius:16px;padding:14px 16px;margin-bottom:12px}
@@ -213,9 +219,17 @@ function afficherFiche(data) {
       (prop.exportee ? ' — déjà exportée' : ' — pas encore exportée') + '</div>'
     : '';
 
+  const badge = p.actif === false
+    ? '<span class="badge-inactif">inactif</span>'
+    : '<span class="badge-actif">actif</span>';
+  const depots = [];
+  if (p.stockDepot != null) depots.push('Dépôt : <b>' + p.stockDepot + '</b>');
+  if (p.stockDepot2 != null) depots.push('Dépôt 2 : <b>' + p.stockDepot2 + '</b>');
+  if (p.stockFdcm != null) depots.push('FDCM : <b>' + p.stockFdcm + '</b>');
+
   zone.innerHTML =
     '<div class="fiche">' +
-      '<h2>' + ech(p.description) + '</h2>' +
+      '<h2>' + ech(p.description) + badge + '</h2>' +
       '<div class="ref">Article ' + ech(p.codeArticle) + ' · EAN ' + ech(p.ean || '—') +
         (p.fournisseur ? ' · ' + ech(p.fournisseur) : '') + '</div>' +
       '<div class="stats">' +
@@ -224,6 +238,7 @@ function afficherFiche(data) {
         '<div class="stat"><b>' + p.stockMax + '</b><span>Max</span></div>' +
         '<div class="stat"><b>' + (p.vpe == null ? '—' : p.vpe) + '</b><span>VPE</span></div>' +
       '</div>' +
+      (depots.length ? '<p class="contexte">Stock dépôt — ' + depots.join(' · ') + '</p>' : '') +
       (p.vk12 != null ? '<p class="contexte">Ventes 12 derniers mois (VK-12) : <b>' + p.vk12 + '</b></p>' : '') +
     '</div>' +
     '<div class="ventes"><h3>Ventes Fami · 5 dernières semaines</h3>' + graph + '</div>' +

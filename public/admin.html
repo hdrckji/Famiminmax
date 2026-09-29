@@ -98,7 +98,14 @@
     <div class="resultat" id="resVentes"></div>
   </div>
 
-  <h2>3 · Propositions d'adaptation</h2>
+  <h2>3 · Scans non reconnus</h2>
+  <div class="carte">
+    <div class="det">Codes-barres scannés en magasin mais introuvables au référentiel — le plus souvent des articles à plusieurs codes-barres dont l'export ERP ne reprend que le principal. À vérifier dans l'ERP puis corriger (ou signaler).</div>
+    <div id="tableScans" style="margin-top:10px"></div>
+    <div class="ligne-form"><button class="btn danger" id="btnViderScans" style="display:none">Vider la liste</button></div>
+  </div>
+
+  <h2>4 · Propositions d'adaptation</h2>
   <div class="ligne-form" style="margin-bottom:10px">
     <button class="btn" id="btnExportNouvelles">⬇ Exporter les nouvelles (Excel)</button>
     <button class="btn secondaire" id="btnExportToutes">Tout exporter</button>
@@ -135,6 +142,7 @@ async function demarrer() {
     document.getElementById('contenu').style.display = 'block';
     afficherEtat(await rep.json());
     chargerPropositions();
+    chargerScansInconnus();
   } catch {
     montrerPorte(false);
   }
@@ -259,6 +267,29 @@ async function chargerPropositions() {
       demarrer();
     }));
 }
+
+async function chargerScansInconnus() {
+  const rep = await appel('/api/scans-inconnus');
+  const { scans } = await rep.json();
+  const cible = document.getElementById('tableScans');
+  const btn = document.getElementById('btnViderScans');
+  if (!scans.length) {
+    cible.innerHTML = '<p class="vide">Aucun scan non reconnu — tous les codes scannés ont trouvé leur produit. 👌</p>';
+    btn.style.display = 'none';
+    return;
+  }
+  cible.innerHTML = '<table><thead><tr><th>Code scanné</th><th>Nb de scans</th><th>Premier</th><th>Dernier</th></tr></thead><tbody>' +
+    scans.map((s) =>
+      '<tr><td><b>' + ech(s.code) + '</b></td><td>' + s.nb + '</td><td>' + fdatetime(s.premierLe) + '</td><td>' + fdatetime(s.dernierLe) + '</td></tr>'
+    ).join('') + '</tbody></table>';
+  btn.style.display = 'inline-block';
+}
+
+document.getElementById('btnViderScans').addEventListener('click', async () => {
+  if (!confirm('Vider la liste des scans non reconnus ?')) return;
+  await appel('/api/scans-inconnus-vider', { method: 'POST' });
+  chargerScansInconnus();
+});
 
 async function exporter(mode) {
   const info = document.getElementById('resExport');

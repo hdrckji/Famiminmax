@@ -70,7 +70,18 @@ async function apiProduit(req, res, url) {
     `SELECT * FROM produits WHERE ean IN (${placeholders}) OR code_article = $${candidats.length + 1} LIMIT 6`,
     [...candidats, brut]
   );
-  if (!r.rows.length) return json(res, 404, { erreur: `Aucun produit trouvé pour « ${brut} ».` });
+  if (!r.rows.length) {
+    // Journal des codes scannés introuvables : visible dans l'admin pour
+    // compléter le référentiel (articles à plusieurs codes-barres, etc.).
+    await db.requete(
+      `INSERT INTO scans_inconnus (code) VALUES ($1)
+       ON CONFLICT (code) DO UPDATE SET nb = scans_inconnus.nb + 1, dernier_le = now()`,
+      [brut.slice(0, 40)]
+    );
+    return json(res, 404, {
+      erreur: `Aucun produit trouvé pour « ${brut} ». Le code est enregistré pour analyse (certains articles ont plusieurs codes-barres et l'export ERP n'en reprend qu'un).`,
+    });
+  }
   if (r.rows.length > 1) {
     return json(res, 200, {
       choix: r.rows.map((p) => ({ codeArticle: p.code_article, ean: p.ean, description: p.description })),
@@ -100,6 +111,10 @@ async function apiProduit(req, res, url) {
       vk12: p.vk12,
       fournisseur: p.fournisseur,
       numCommande: p.num_commande,
+      actif: p.actif !== false,
+      stockDepot: p.stock_depot,
+      stockDepot2: p.stock_depot2,
+      stockFdcm: p.stock_fdcm,
       majLe: p.maj_le,
     },
     ventes: ventes.rows
@@ -218,6 +233,18 @@ async function apiImportVentes(req, res, url) {
   });
 }
 
+async function apiScansInconnus(req, res) {
+  const r = await db.requete('SELECT * FROM scans_inconnus ORDER BY dernier_le DESC LIMIT 100');
+  json(res, 200, {
+    scans: r.rows.map((s) => ({ code: s.code, nb: s.nb, premierLe: s.premier_le, dernierLe: s.dernier_le })),
+  });
+}
+
+async function apiScansVider(req, res) {
+  await db.requete('DELETE FROM scans_inconnus');
+  json(res, 200, { ok: true });
+}
+
 async function apiEtat(req, res) {
   const prod = await db.requete('SELECT COUNT(*)::int AS nb, MAX(maj_le) AS maj FROM produits');
   const sem = await db.requete('SELECT debut, nb_lignes, importe_le FROM semaines_ventes ORDER BY debut DESC LIMIT 8');
@@ -273,7 +300,7 @@ const serveur = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname.startsWith('/api/')) {
-      const ADMIN_ROUTES = ['/api/propositions', '/api/proposition-suppr', '/api/import/minimums', '/api/import/ventes', '/api/etat', '/api/export'];
+      const ADMIN_ROUTES = ['/api/propositions', '/api/proposition-suppr', '/api/import/minimums', '/api/import/ventes', '/api/etat', '/api/export', '/api/scans-inconnus', '/api/scans-inconnus-vider'];
       if (ADMIN_ROUTES.includes(url.pathname) && !estAdmin(req, url)) {
         return json(res, 401, { erreur: 'Code d’accès admin invalide.' });
       }
@@ -285,6 +312,8 @@ const serveur = http.createServer(async (req, res) => {
       if (route === 'POST /api/import/minimums') return await apiImportMinimums(req, res);
       if (route === 'POST /api/import/ventes') return await apiImportVentes(req, res, url);
       if (route === 'GET /api/etat') return await apiEtat(req, res);
+      if (route === 'GET /api/scans-inconnus') return await apiScansInconnus(req, res);
+      if (route === 'POST /api/scans-inconnus-vider') return await apiScansVider(req, res);
       if (route === 'GET /api/export') return await apiExport(req, res, url);
       return json(res, 404, { erreur: 'Route inconnue.' });
     }

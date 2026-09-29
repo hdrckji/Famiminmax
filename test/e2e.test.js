@@ -19,14 +19,14 @@ async function fabriquerMinimums() {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Export');
   ws.addRow(['Article', 'Description', 'VK-12', 'Stock (de marchandise)', 'Minimale Stock', 'Maximale Stock',
-    'Récolte', 'VPE', 'PA', 'Fournisseur', 'N°decommande.', 'EAN barcode']);
+    'Récolte', 'VPE', 'PA', 'Fournisseur', 'N°decommande.', 'EAN barcode', 'Actief AK', 'FDepot', 'FDepot2', 'FDCM']);
   // Doublon de code article (cas réel dans Beta4) : la dernière ligne doit gagner
-  ws.addRow(['57913', 'Goudspray 150ml (ancien)', '248', '124', '96', '132', '0', '12', '1.16', 'Goodmark Europe NV', '022280', '5410764216374']);
-  ws.addRow(['57913', 'Goudspray 150ml', '248', '124', '120', '132', '0', '12', '1.16', 'Goodmark Europe NV', '022280', '5410764216374']);
-  ws.addRow(['61702', 'Gazebo Lemax', '9', '5', '6', '12', '0', '1', '7.27', 'Lemax BV', 'L-99', '0728162041609']);
-  ws.addRow(['99001', 'Article sans EAN', '0', '2', '0', '0', '0', '1', '2', 'Divers', '', '']);
+  ws.addRow(['57913', 'Goudspray 150ml (ancien)', '248', '124', '96', '132', '0', '12', '1.16', 'Goodmark Europe NV', '022280', '5410764216374', 'True', '0', '0', '0']);
+  ws.addRow(['57913', 'Goudspray 150ml', '248', '124', '120', '132', '0', '12', '1.16', 'Goodmark Europe NV', '022280', '5410764216374', 'True', '687', '0', '3888']);
+  ws.addRow(['61702', 'Gazebo Lemax', '9', '5', '6', '12', '0', '1', '7.27', 'Lemax BV', 'L-99', '0728162041609', 'False', '0', '0', '0']);
+  ws.addRow(['99001', 'Article sans EAN', '0', '2', '0', '0', '0', '1', '2', 'Divers', '', '', 'True', '', '', '']);
   // EAN écrit en cellule numérique (cas réel possible)
-  ws.addRow(['99002', 'EAN numérique', 3, 7, 4, 8, 0, 1, 1.5, 'Divers', '', 5412345678908]);
+  ws.addRow(['99002', 'EAN numérique', 3, 7, 4, 8, 0, 1, 1.5, 'Divers', '', 5412345678908, 'True', 5, 0, 12]);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -91,6 +91,10 @@ test('scan par EAN : fiche produit + ventes', async () => {
   assert.strictEqual(data.produit.stockMin, 120);
   assert.strictEqual(data.produit.stockMax, 132);
   assert.strictEqual(data.produit.vk12, 248);
+  assert.strictEqual(data.produit.actif, true);
+  assert.strictEqual(data.produit.stockDepot, 687);
+  assert.strictEqual(data.produit.stockDepot2, 0);
+  assert.strictEqual(data.produit.stockFdcm, 3888);
   assert.strictEqual(data.ventes.length, 2);
   assert.deepStrictEqual(data.ventes.map((v) => v.semaine), ['2026-09-14', '2026-09-21']);
   assert.deepStrictEqual(data.ventes.map((v) => v.qteFami), [18, 30]);
@@ -102,6 +106,24 @@ test('scan UPC-A 12 chiffres retrouve l’EAN-13 à zéro de tête', async () =>
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
   assert.strictEqual(data.produit.codeArticle, '61702');
+  assert.strictEqual(data.produit.actif, false); // Actief AK = False dans le fichier
+});
+
+test('les scans introuvables sont journalisés puis vidables', async () => {
+  await api('/api/scans-inconnus-vider', { method: 'POST', headers: ADMIN }); // repart de zéro
+  await api('/api/produit?code=5400924479374');
+  await api('/api/produit?code=5400924479374');
+  await api('/api/produit?code=1112223334445');
+
+  let { scans } = await (await api('/api/scans-inconnus', { headers: ADMIN })).json();
+  assert.strictEqual(scans.length, 2);
+  const double = scans.find((s) => s.code === '5400924479374');
+  assert.strictEqual(double.nb, 2);
+
+  const rep = await api('/api/scans-inconnus-vider', { method: 'POST', headers: ADMIN });
+  assert.strictEqual(rep.status, 200);
+  ({ scans } = await (await api('/api/scans-inconnus', { headers: ADMIN })).json());
+  assert.strictEqual(scans.length, 0);
 });
 
 test('recherche par code article et code inconnu', async () => {
