@@ -24,7 +24,7 @@ const MIMES = {
 
 function json(res, code, data) {
   const body = JSON.stringify(data);
-  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(body);
 }
 
@@ -290,7 +290,13 @@ function servirStatique(res, fichier) {
     res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
     return res.end('Introuvable');
   }
-  res.writeHead(200, { 'Content-Type': MIMES[path.extname(cible)] || 'application/octet-stream' });
+  const ext = path.extname(cible);
+  res.writeHead(200, {
+    'Content-Type': MIMES[ext] || 'application/octet-stream',
+    // Les pages HTML doivent être revalidées à chaque visite, sinon les TC26
+    // gardent l'ancienne version après un déploiement.
+    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=3600',
+  });
   fs.createReadStream(cible).pipe(res);
 }
 
@@ -304,7 +310,12 @@ const serveur = http.createServer(async (req, res) => {
       if (ADMIN_ROUTES.includes(url.pathname) && !estAdmin(req, url)) {
         return json(res, 401, { erreur: 'Code d’accès admin invalide.' });
       }
-      if (route === 'GET /api/sante') return json(res, 200, { ok: true });
+      if (route === 'GET /api/sante') {
+        return json(res, 200, {
+          ok: true,
+          version: (process.env.RAILWAY_GIT_COMMIT_SHA || 'dev').slice(0, 7),
+        });
+      }
       if (route === 'GET /api/produit') return await apiProduit(req, res, url);
       if (route === 'POST /api/proposition') return await apiProposer(req, res);
       if (route === 'GET /api/propositions') return await apiPropositions(req, res);
