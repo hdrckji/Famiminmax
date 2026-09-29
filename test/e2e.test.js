@@ -27,6 +27,8 @@ async function fabriquerMinimums() {
   ws.addRow(['99001', 'Article sans EAN', '0', '2', '0', '0', '0', '1', '2', 'Divers', '', '', 'True', '', '', '']);
   // EAN écrit en cellule numérique (cas réel possible)
   ws.addRow(['99002', 'EAN numérique', 3, 7, 4, 8, 0, 1, 1.5, 'Divers', '', 5412345678908, 'True', 5, 0, 12]);
+  // Inactif mais avec du stock dépôt : la proposition doit rester possible
+  ws.addRow(['99003', 'Inactif avec stock dépôt', '0', '0', '0', '0', '0', '1', '1', 'Divers', '', '5410999999990', 'False', '0', '0', '50']);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -63,7 +65,7 @@ test('import du fichier minimums', async () => {
   const rep = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
-  assert.strictEqual(data.nbArticles, 4); // le doublon 57913 est dédupliqué
+  assert.strictEqual(data.nbArticles, 5); // le doublon 57913 est dédupliqué
   assert.strictEqual(data.nbAvecMin, 3);
   assert.ok(data.avertissements.some((a) => /doublon/.test(a)), 'avertissement doublons attendu');
   assert.ok(data.avertissements.some((a) => /sans EAN/.test(a)), 'avertissement sans EAN attendu');
@@ -193,7 +195,7 @@ test('réimport des minimums : le référentiel est remplacé, la proposition re
   const rep = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
   assert.strictEqual(rep.status, 200);
   const etat = await (await api('/api/etat', { headers: ADMIN })).json();
-  assert.strictEqual(etat.produits.nb, 4);
+  assert.strictEqual(etat.produits.nb, 5);
   assert.strictEqual(etat.propositions.total, 1);
   assert.strictEqual(etat.semaines.length, 2);
 });
@@ -203,4 +205,24 @@ test('suppression d’une proposition', async () => {
   assert.strictEqual(rep.status, 200);
   const liste = await (await api('/api/propositions', { headers: ADMIN })).json();
   assert.strictEqual(liste.propositions.length, 0);
+});
+
+test('proposition bloquée pour un article inactif sans stock dépôt', async () => {
+  // 61702 : inactif, dépôts 0/0/0 -> refusé
+  const ko = await api('/api/proposition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ codeArticle: '61702', minPropose: 10 }),
+  });
+  assert.strictEqual(ko.status, 409);
+  assert.match((await ko.json()).erreur, /inactif sans stock dépôt/);
+
+  // 99003 : inactif mais 50 en FDCM -> autorisé
+  const ok = await api('/api/proposition', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ codeArticle: '99003', minPropose: 4 }),
+  });
+  assert.strictEqual(ok.status, 200, JSON.stringify(await ok.json()));
+  await api('/api/proposition-suppr?codeArticle=99003', { method: 'POST', headers: ADMIN });
 });

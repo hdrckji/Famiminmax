@@ -155,6 +155,13 @@ async function apiProposer(req, res) {
   if (!r.rows.length) return json(res, 404, { erreur: 'Produit inconnu.' });
   const p = r.rows[0];
 
+  // Règle métier : pas de proposition pour un article inactif sans stock dépôt
+  // (article en fin de vie, adapter son minimum n'a pas de sens).
+  const stockDepots = (p.stock_depot || 0) + (p.stock_depot2 || 0) + (p.stock_fdcm || 0);
+  if (p.actif === false && stockDepots === 0) {
+    return json(res, 409, { erreur: 'Article inactif sans stock dépôt : proposition désactivée.' });
+  }
+
   const commentaire = String(corps.commentaire || '').trim().slice(0, 500) || null;
   const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
 

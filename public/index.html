@@ -211,6 +211,10 @@ function afficherFiche(data) {
     }).join('') + '</div>';
   }
 
+  // Article inactif sans aucun stock dépôt : fin de vie, proposition désactivée
+  const bloque = p.actif === false &&
+    ((p.stockDepot || 0) + (p.stockDepot2 || 0) + (p.stockFdcm || 0)) === 0;
+
   const prop = data.proposition;
   const valeurInitiale = prop ? prop.minPropose : p.stockMin;
   const enCours = prop
@@ -242,7 +246,10 @@ function afficherFiche(data) {
       (p.vk12 != null ? '<p class="contexte">Ventes 12 derniers mois (VK-12) : <b>' + p.vk12 + '</b></p>' : '') +
     '</div>' +
     '<div class="ventes"><h3>Ventes Fami · 5 dernières semaines</h3>' + graph + '</div>' +
-    '<div class="proposer"><h3>Proposer une adaptation du minimum</h3>' + enCours +
+    (bloque
+      ? '<div class="proposer"><h3>Proposition désactivée</h3>' +
+        '<p class="msg info" style="margin:0">Article <b>inactif</b> sans stock dépôt : il est en fin de vie, son minimum rayon ne doit plus être adapté.</p></div>'
+      : '<div class="proposer"><h3>Proposer une adaptation du minimum</h3>' + enCours +
       '<div class="stepper">' +
         '<button type="button" id="moins">−</button>' +
         '<input id="nouveauMin" type="number" min="0" max="100000" step="1" value="' + valeurInitiale + '" />' +
@@ -251,7 +258,9 @@ function afficherFiche(data) {
       '<textarea id="commentaire" maxlength="500" placeholder="Commentaire (facultatif)"></textarea>' +
       '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (facultatif)" />' +
       '<button class="btn-valider" id="valider">Envoyer la proposition</button>' +
-    '</div>';
+      '</div>');
+
+  if (bloque) { refocus(); return; }
 
   const nouveauMin = document.getElementById('nouveauMin');
   const pas = p.vpe && p.vpe > 1 ? p.vpe : 1;
