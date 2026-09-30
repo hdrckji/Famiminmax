@@ -6,8 +6,9 @@ via scan sur Zebra TC26.
 L'ERP ne permet pas de voir le minimum rayon paramétré par produit, ni de changer la
 collection depuis un Zebra. Famiminmax comble ce trou : les collègues scannent un produit,
 voient le minimum (= capacité du rayon plein), le stock, les ventes des 5 dernières semaines
-et la collection, puis proposent une adaptation. L'acheteur valide ou refuse (motif visible
-au rescan), et exporte les propositions validées en Excel au format d'import ERP.
+et la collection, puis proposent une adaptation. Les propositions sont **validées d'office** ;
+l'acheteur refuse celles qui posent problème (motif visible au rescan, alertes de fiabilité
+pour les repérer) et exporte les validées en Excel au format d'import ERP.
 
 ## Écrans
 
@@ -19,10 +20,11 @@ au rescan), et exporte les propositions validées en Excel au format d'import ER
   par type : la dernière écrase la précédente et repart au début du circuit. Le collègue voit
   l'état de sa demande en rescannant (en attente / validée / traitée / refusée + motif).
   Article inactif sans stock dépôt = proposition de minimum désactivée.
-- **`/admin` — administration (PC)** : protégée par code d'accès. Imports (minimums, ventes,
-  collections), journal des scans non reconnus, et tableau des propositions avec **alertes de
-  fiabilité** et actions ✓ Valider / ✗ Refuser (motif obligatoire). L'export ne sort que les
-  propositions **validées** et les passe « traitées » ; l'historique reste consultable.
+- **`/admin` — administration (PC)** : protégée par code d'accès, deux onglets. « Propositions
+  d'adaptation » : tableau avec **alertes de fiabilité**, action ✗ Refuser (motif obligatoire) —
+  les propositions sont validées d'office. L'export ne sort que les **validées** et les passe
+  « traitées » ; l'historique (refusées/traitées) reste consultable, avec revalidation possible.
+  « Imports & données » : les trois imports et le journal des scans non reconnus.
 
 ## Alertes de fiabilité (propositions de minimum)
 
@@ -49,9 +51,9 @@ automatiquement l'EAN-13 à zéro de tête.
 
 1. Exporter depuis l'ERP : minimums, ventes de la semaine écoulée, collections.
 2. Sur `/admin` : importer les trois (choisir le **lundi** de la semaine pour les ventes).
-3. Traiter les propositions : valider / refuser, puis « Minimums validés (format ERP) » →
-   fichier `adaptations-minimums-AAAA-MM-JJ.xlsx` → import dans l'ERP. Idem pour les
-   collections (format provisoire, à caler sur l'ERP).
+3. Passer en revue les propositions (refuser les douteuses), puis « Minimums validés
+   (format ERP) » → fichier `adaptations-minimums-AAAA-MM-JJ.xlsx` → import dans l'ERP.
+   Idem pour les collections (format provisoire, à caler sur l'ERP).
 
 ## Déploiement Railway
 

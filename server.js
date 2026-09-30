@@ -188,15 +188,15 @@ async function apiProposer(req, res) {
   const commentaire = String(corps.commentaire || '').trim().slice(0, 500) || null;
   const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
 
-  // Une seule proposition par produit : la dernière écrase la précédente
-  // et repart au début du circuit de validation.
+  // Une seule proposition par produit : la dernière écrase la précédente.
+  // Validée d'office — l'acheteur n'intervient que pour refuser.
   await db.requete(
-    `INSERT INTO propositions (code_article, ean, description, min_actuel, min_propose, commentaire, auteur)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO propositions (code_article, ean, description, min_actuel, min_propose, commentaire, auteur, statut)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'validee')
      ON CONFLICT (code_article) DO UPDATE SET
        ean = EXCLUDED.ean, description = EXCLUDED.description, min_actuel = EXCLUDED.min_actuel,
        min_propose = EXCLUDED.min_propose, commentaire = EXCLUDED.commentaire, auteur = EXCLUDED.auteur,
-       statut = 'a_traiter', motif_refus = NULL, decide_le = NULL,
+       statut = 'validee', motif_refus = NULL, decide_le = NULL,
        maj_le = now(), exporte_le = NULL`,
     [codeArticle, p.ean, p.description, p.stock_min, minPropose, commentaire, auteur]
   );
@@ -227,19 +227,20 @@ async function apiProposerCollection(req, res) {
 
   const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
   await db.requete(
-    `INSERT INTO propositions_collection (code_article, ean, description, collection_actuelle, collection_proposee, auteur)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO propositions_collection (code_article, ean, description, collection_actuelle, collection_proposee, auteur, statut)
+     VALUES ($1, $2, $3, $4, $5, $6, 'validee')
      ON CONFLICT (code_article) DO UPDATE SET
        ean = EXCLUDED.ean, description = EXCLUDED.description,
        collection_actuelle = EXCLUDED.collection_actuelle, collection_proposee = EXCLUDED.collection_proposee,
-       auteur = EXCLUDED.auteur, statut = 'a_traiter', motif_refus = NULL, decide_le = NULL,
+       auteur = EXCLUDED.auteur, statut = 'validee', motif_refus = NULL, decide_le = NULL,
        maj_le = now(), exporte_le = NULL`,
     [codeArticle, p.ean, p.description, actuelle.rows.length ? actuelle.rows[0].collection : null, collectionProposee, auteur]
   );
   json(res, 200, { ok: true });
 }
 
-// Décision de l'acheteur : valider / refuser (motif obligatoire) / rouvrir.
+// Décision de l'acheteur : refuser (motif obligatoire) ou revalider (rouvrir un refus).
+// Les propositions sont validées d'office à la création.
 async function apiDecision(req, res) {
   let corps;
   try {
@@ -252,8 +253,8 @@ async function apiDecision(req, res) {
   const decision = String(corps.decision || '');
   const motif = String(corps.motif || '').trim().slice(0, 300);
   if (!codeArticle) return json(res, 400, { erreur: 'codeArticle manquant.' });
-  if (!['validee', 'refusee', 'a_traiter'].includes(decision)) {
-    return json(res, 400, { erreur: 'Décision invalide (validee / refusee / a_traiter).' });
+  if (!['validee', 'refusee'].includes(decision)) {
+    return json(res, 400, { erreur: 'Décision invalide (validee / refusee).' });
   }
   if (decision === 'refusee' && !motif) {
     return json(res, 400, { erreur: 'Le motif est obligatoire pour un refus.' });
@@ -263,7 +264,7 @@ async function apiDecision(req, res) {
     `UPDATE ${table}
         SET statut = $1,
             motif_refus = $2,
-            decide_le = ${decision === 'a_traiter' ? 'NULL' : 'now()'}
+            decide_le = now()
       WHERE code_article = $3`,
     [decision, decision === 'refusee' ? motif : null, codeArticle]
   );

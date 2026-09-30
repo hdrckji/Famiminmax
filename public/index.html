@@ -204,16 +204,15 @@ async function chargerCollections() {
   return listeCollections;
 }
 
-// Bannière d'état d'une demande dans le circuit de validation de l'acheteur.
+// Bannière d'état d'une demande : validée d'office, l'acheteur peut refuser.
 function banniereStatut(prop, resume) {
-  const s = prop.statut || 'a_traiter';
+  const s = prop.statut || 'validee';
   if (s === 'refusee') {
-    return '<div class="encours refus">✗ ' + resume + ' — <b>refusée</b>' +
+    return '<div class="encours refus">✗ ' + resume + ' — <b>refusée par l\'acheteur</b>' +
       (prop.motifRefus ? ' : ' + ech(prop.motifRefus) : '') + '<br>Vous pouvez faire une nouvelle proposition.</div>';
   }
-  if (s === 'validee') return '<div class="encours">✓ ' + resume + ' — <b>validée par l\'acheteur</b>, en cours de traitement.</div>';
   if (s === 'traitee') return '<div class="encours">✓ ' + resume + ' — <b>traitée</b>, adaptée dans l\'ERP.</div>';
-  return '<div class="encours attente">⏳ ' + resume + ' — en attente de validation par l\'acheteur.</div>';
+  return '<div class="encours">✓ ' + resume + ' — <b>enregistrée</b>, sera transmise à l\'ERP au prochain export.</div>';
 }
 
 async function chercher(code) {

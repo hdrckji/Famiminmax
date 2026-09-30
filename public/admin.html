@@ -88,7 +88,7 @@
     <div class="carte"><b class="gros" id="nbProduits">—</b>articles au référentiel<div class="det" id="majProduits"></div></div>
     <div class="carte"><b class="gros" id="nbSemaines">—</b>semaines de ventes<ul id="listeSemaines"></ul></div>
     <div class="carte"><b class="gros" id="nbCollections">—</b>articles avec collection<div class="det">via le fichier collections</div></div>
-    <div class="carte"><b class="gros" id="nbATraiter">—</b>propositions à traiter<div class="det" id="detProp"></div></div>
+    <div class="carte"><b class="gros" id="nbValidees">—</b>propositions à exporter<div class="det" id="detProp"></div></div>
   </div>
 
   <div class="onglets">
@@ -98,7 +98,7 @@
 
   <div id="vueProp">
     <h2>Propositions d'adaptation</h2>
-    <div class="det" style="margin-bottom:10px">Circuit : le collègue propose → vous <b>validez</b> ou <b>refusez</b> (motif obligatoire, visible sur son Zebra) → l'export Excel ne sort que les <b>validées</b> et les passe « traitées ».</div>
+    <div class="det" style="margin-bottom:10px">Les propositions sont <b>validées automatiquement</b>. Refusez celles qui posent problème (motif obligatoire, visible sur le Zebra du collègue) — les alertes ⚠ vous aident à les repérer. L'export sort toutes les validées et les passe « traitées ».</div>
     <div class="ligne-form" style="margin-bottom:10px">
       <button class="btn" id="btnExportMin">⬇ Minimums validés (format ERP)</button>
       <button class="btn" id="btnExportColl">⬇ Collections validées</button>
@@ -226,9 +226,8 @@ function afficherEtat(etat) {
     return '<li>Du <b>' + fdate(s.debut + 'T12:00:00') + '</b> au <b>' + fdate(fin.toISOString()) + '</b> — ' + s.nbLignes + ' articles</li>';
   }).join('');
   document.getElementById('nbCollections').textContent = (etat.collections ? etat.collections.nbArticles : 0).toLocaleString('fr-BE');
-  document.getElementById('nbATraiter').textContent = etat.propositions.aTraiter || 0;
-  document.getElementById('detProp').textContent =
-    (etat.propositions.validees || 0) + ' validée(s) à exporter · ' + etat.propositions.total + ' au total';
+  document.getElementById('nbValidees').textContent = etat.propositions.validees || 0;
+  document.getElementById('detProp').textContent = etat.propositions.total + ' proposition(s) au total';
 }
 
 // Lundi de la semaine passée par défaut
@@ -332,15 +331,11 @@ async function chargerPropositions() {
 
   let html = '';
   if (!actives.length) {
-    html += '<p class="vide">Rien à traiter — toutes les propositions sont validées, refusées ou traitées. 👌</p>';
+    html += '<p class="vide">Aucune proposition en attente d\'export — tout est traité ou refusé. 👌</p>';
   } else {
     html += ENTETE + actives.map((p) => {
       const cle = `data-type="${p.type}" data-code="${ech(p.codeArticle)}"`;
-      const actions = p.statut === 'a_traiter'
-        ? `<button class="btn" style="padding:6px 10px;font-size:12.5px" data-decision="validee" ${cle}>✓ Valider</button>` +
-          `<button class="btn danger" data-decision="refusee" ${cle}>✗ Refuser</button>`
-        : `<button class="btn danger" data-decision="a_traiter" ${cle}>↩ Annuler</button>`;
-      return ligneProposition(p, actions);
+      return ligneProposition(p, `<button class="btn danger" data-decision="refusee" ${cle}>✗ Refuser</button>`);
     }).join('') + '</tbody></table>';
   }
   if (historique.length) {
@@ -348,7 +343,7 @@ async function chargerPropositions() {
       ENTETE + historique.map((p) => {
         const cle = `data-type="${p.type}" data-code="${ech(p.codeArticle)}"`;
         const actions = (p.statut === 'refusee'
-          ? `<button class="btn danger" data-decision="a_traiter" ${cle}>↩ Rouvrir</button>` : '') +
+          ? `<button class="btn danger" data-decision="validee" ${cle}>↩ Revalider</button>` : '') +
           `<button class="btn danger" data-suppr ${cle}>✕</button>`;
         return ligneProposition(p, actions);
       }).join('') + '</tbody></table></details>';

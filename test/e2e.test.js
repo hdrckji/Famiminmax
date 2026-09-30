@@ -156,7 +156,7 @@ test('proposition min : circuit complet avec alertes', async () => {
   });
   assert.strictEqual(rep.status, 200);
   let f = await fiche('57913');
-  assert.strictEqual(f.proposition.statut, 'a_traiter');
+  assert.strictEqual(f.proposition.statut, 'validee'); // validée d'office
 
   let { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
   assert.strictEqual(propositions.length, 1);
@@ -184,33 +184,32 @@ test('proposition invalide refusée', async () => {
   assert.strictEqual(rep.status, 400);
 });
 
-test('export sans validation : rien ne sort', async () => {
-  const rep = await api('/api/export?type=min&mode=validees', { headers: ADMIN });
-  assert.strictEqual(rep.status, 404);
-});
-
-test('refus avec motif, visible au rescan, puis nouvelle proposition', async () => {
-  // Refus sans motif : rejeté
+test('refus avec motif, revalidation, puis nouvelle proposition', async () => {
+  // Refus sans motif : rejeté ; décision inconnue : rejetée
   assert.strictEqual((await decider('min', '57913', 'refusee', '')).status, 400);
+  assert.strictEqual((await decider('min', '57913', 'a_traiter')).status, 400);
 
   assert.strictEqual((await decider('min', '57913', 'refusee', 'Colisage imposé par le fournisseur')).status, 200);
   let f = await fiche('57913');
   assert.strictEqual(f.proposition.statut, 'refusee');
   assert.strictEqual(f.proposition.motifRefus, 'Colisage imposé par le fournisseur');
 
-  // Le collègue repropose : le circuit repart
+  // L'acheteur peut revenir sur son refus
+  assert.strictEqual((await decider('min', '57913', 'validee')).status, 200);
+  assert.strictEqual((await fiche('57913')).proposition.statut, 'validee');
+
+  // Et le collègue peut reproposer : la dernière écrase, validée d'office
   const rep = await api('/api/proposition', {
     method: 'POST', headers: JSON_H,
     body: JSON.stringify({ codeArticle: '57913', minPropose: 96, auteur: 'Kim' }),
   });
   assert.strictEqual(rep.status, 200);
   f = await fiche('57913');
-  assert.strictEqual(f.proposition.statut, 'a_traiter');
+  assert.strictEqual(f.proposition.statut, 'validee');
   assert.strictEqual(f.proposition.motifRefus, null);
 });
 
-test('validation puis export ERP : la proposition passe traitée', async () => {
-  assert.strictEqual((await decider('min', '57913', 'validee')).status, 200);
+test('export ERP : la proposition validée d’office passe traitée', async () => {
   const etat = await (await api('/api/etat', { headers: ADMIN })).json();
   assert.strictEqual(etat.propositions.aTraiter, 0);
   assert.strictEqual(etat.propositions.validees, 1);
@@ -253,16 +252,15 @@ test('proposition de collection : liste fermée, circuit et export', async () =>
   assert.strictEqual(rep.status, 200, JSON.stringify(await rep.json()));
 
   const f = await fiche('57913');
-  assert.strictEqual(f.propositionCollection.statut, 'a_traiter');
+  assert.strictEqual(f.propositionCollection.statut, 'validee'); // validée d'office
   assert.strictEqual(f.propositionCollection.collectionProposee, 'SugarCrush26-06');
   assert.strictEqual(f.propositionCollection.collectionActuelle, 'Lemax26-03');
 
   const { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
   const coll = propositions.find((p) => p.type === 'collection');
   assert.ok(coll, 'la proposition de collection doit être dans la liste admin');
-  assert.strictEqual(coll.statut, 'a_traiter');
+  assert.strictEqual(coll.statut, 'validee');
 
-  assert.strictEqual((await decider('collection', '57913', 'validee')).status, 200);
   const exp = await api('/api/export?type=collection&mode=validees', { headers: ADMIN });
   assert.strictEqual(exp.status, 200);
   const wb = new ExcelJS.Workbook();
