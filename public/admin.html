@@ -47,9 +47,18 @@
   th{background:var(--donkergroen);color:#fff;font-weight:600;font-size:12.5px;letter-spacing:.03em}
   tr:nth-child(even) td{background:var(--card-2)}
   .fleche{font-weight:800;white-space:nowrap}
-  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:99px}
-  .badge.nouvelle{background:var(--lichtgroen);color:#12321f}
-  .badge.exportee{background:#e4e9df;color:var(--ink-soft)}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:99px;white-space:nowrap}
+  .badge.attente{background:#fdf6e3;color:#5c4a1a;border:1px solid #e6d3a0}
+  .badge.valid{background:var(--lichtgroen);color:#12321f}
+  .badge.traite{background:#e4e9df;color:var(--ink-soft)}
+  .badge.refus{background:var(--rouge-bg);color:#9c3547;border:1px solid var(--rouge)}
+  .badge.type{background:var(--donkergroen);color:#fff;letter-spacing:.03em}
+  .alerte-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;margin:1px 2px 1px 0;
+    background:var(--rouge-bg);color:#9c3547;border:1px solid var(--rouge);cursor:help;white-space:nowrap}
+  .actions button{margin-right:4px}
+  details{margin-top:14px}
+  details summary{cursor:pointer;font-weight:600;color:var(--ink-soft);font-size:14px;margin-bottom:8px}
+  .motif{font-size:12px;color:#9c3547}
   #porte{max-width:400px;margin:80px auto;background:#fff;border:2px solid var(--bord);border-radius:16px;padding:24px;text-align:center}
   #porte input{width:100%;font:inherit;font-size:16px;padding:11px;border-radius:10px;border:2px solid var(--bord);margin:12px 0;text-align:center}
   .vide{color:var(--ink-soft);font-size:13.5px}
@@ -74,7 +83,8 @@
   <div class="cartes">
     <div class="carte"><b class="gros" id="nbProduits">—</b>articles au référentiel<div class="det" id="majProduits"></div></div>
     <div class="carte"><b class="gros" id="nbSemaines">—</b>semaines de ventes<ul id="listeSemaines"></ul></div>
-    <div class="carte"><b class="gros" id="nbNouvelles">—</b>propositions à exporter<div class="det" id="detProp"></div></div>
+    <div class="carte"><b class="gros" id="nbCollections">—</b>articles avec collection<div class="det">via le fichier collections</div></div>
+    <div class="carte"><b class="gros" id="nbATraiter">—</b>propositions à traiter<div class="det" id="detProp"></div></div>
   </div>
 
   <h2>1 · Importer le fichier des minimums rayon</h2>
@@ -98,17 +108,29 @@
     <div class="resultat" id="resVentes"></div>
   </div>
 
-  <h2>3 · Scans non reconnus</h2>
+  <h2>3 · Importer le fichier des collections</h2>
+  <div class="carte">
+    <div class="det">Export ERP avec les colonnes <b>N° art / Code EAN / Collectie</b> (type « noel collection »). Remplace le référentiel des collections et alimente la liste déroulante du scan.</div>
+    <div class="ligne-form">
+      <input type="file" id="fichierColl" accept=".xlsx" />
+      <button class="btn" id="btnImportColl">Importer</button>
+    </div>
+    <div class="resultat" id="resColl"></div>
+  </div>
+
+  <h2>4 · Scans non reconnus</h2>
   <div class="carte">
     <div class="det">Codes-barres scannés en magasin mais introuvables au référentiel — le plus souvent des articles à plusieurs codes-barres dont l'export ERP ne reprend que le principal. À vérifier dans l'ERP puis corriger (ou signaler).</div>
     <div id="tableScans" style="margin-top:10px"></div>
     <div class="ligne-form"><button class="btn danger" id="btnViderScans" style="display:none">Vider la liste</button></div>
   </div>
 
-  <h2>4 · Propositions d'adaptation</h2>
+  <h2>5 · Propositions d'adaptation</h2>
+  <div class="det" style="margin-bottom:10px">Circuit : le collègue propose → vous <b>validez</b> ou <b>refusez</b> (motif obligatoire, visible sur son Zebra) → l'export Excel ne sort que les <b>validées</b> et les passe « traitées ».</div>
   <div class="ligne-form" style="margin-bottom:10px">
-    <button class="btn" id="btnExportNouvelles">⬇ Exporter les nouvelles (Excel)</button>
-    <button class="btn secondaire" id="btnExportToutes">Tout exporter</button>
+    <button class="btn" id="btnExportMin">⬇ Minimums validés (format ERP)</button>
+    <button class="btn" id="btnExportColl">⬇ Collections validées</button>
+    <button class="btn secondaire" id="btnExportMinToutes">Ré-exporter l'historique min</button>
     <span class="det" id="resExport"></span>
   </div>
   <div id="tableProp"></div>
@@ -178,8 +200,10 @@ function afficherEtat(etat) {
     const fin = new Date(s.debut + 'T12:00:00'); fin.setDate(fin.getDate() + 6);
     return '<li>Du <b>' + fdate(s.debut + 'T12:00:00') + '</b> au <b>' + fdate(fin.toISOString()) + '</b> — ' + s.nbLignes + ' articles</li>';
   }).join('');
-  document.getElementById('nbNouvelles').textContent = etat.propositions.nouvelles || 0;
-  document.getElementById('detProp').textContent = etat.propositions.total + ' proposition(s) au total';
+  document.getElementById('nbCollections').textContent = (etat.collections ? etat.collections.nbArticles : 0).toLocaleString('fr-BE');
+  document.getElementById('nbATraiter').textContent = etat.propositions.aTraiter || 0;
+  document.getElementById('detProp').textContent =
+    (etat.propositions.validees || 0) + ' validée(s) à exporter · ' + etat.propositions.total + ' au total';
 }
 
 // Lundi de la semaine passée par défaut
@@ -241,32 +265,103 @@ document.getElementById('btnImportVentes').addEventListener('click', async (e) =
   }
 });
 
+const LIB_ALERTES = { ventes: '⚠ ventes', depot: '⚠ dépôt', variation: '⚠ écart', vpe: '⚠ VPE' };
+const LIB_STATUTS = {
+  a_traiter: ['attente', 'à traiter'],
+  validee: ['valid', 'validée'],
+  refusee: ['refus', 'refusée'],
+  traitee: ['traite', 'traitée'],
+};
+
+function celluleDemande(p) {
+  return p.type === 'min'
+    ? '<span class="fleche">' + p.minActuel + ' → ' + p.minPropose + '</span>'
+    : ech(p.collectionActuelle || '—') + ' → <b>' + ech(p.collectionProposee) + '</b>';
+}
+
+function ligneProposition(p, actions) {
+  const [cls, lib] = LIB_STATUTS[p.statut] || LIB_STATUTS.a_traiter;
+  const alertes = (p.alertes || []).map((a) =>
+    '<span class="alerte-badge" title="' + ech(a.detail) + '">' + (LIB_ALERTES[a.code] || a.code) + '</span>').join('');
+  return '<tr>' +
+    '<td><span class="badge type">' + (p.type === 'min' ? 'MIN' : 'COLL') + '</span></td>' +
+    '<td>' + ech(p.codeArticle) + '</td>' +
+    '<td>' + ech(p.description) + (p.fournisseur ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">' + ech(p.fournisseur) + '</span>' : '') + '</td>' +
+    '<td>' + celluleDemande(p) + '</td>' +
+    '<td>' + (alertes || '—') + (p.commentaire ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">💬 ' + ech(p.commentaire) + '</span>' : '') +
+      (p.motifRefus ? '<br><span class="motif">Refus : ' + ech(p.motifRefus) + '</span>' : '') + '</td>' +
+    '<td>' + ech(p.auteur || '—') + '</td>' +
+    '<td>' + fdatetime(p.majLe) + '</td>' +
+    '<td><span class="badge ' + cls + '">' + lib + '</span></td>' +
+    '<td class="actions">' + actions + '</td></tr>';
+}
+
 async function chargerPropositions() {
   const rep = await appel('/api/propositions');
   const { propositions } = await rep.json();
   const cible = document.getElementById('tableProp');
-  if (!propositions.length) {
-    cible.innerHTML = '<p class="vide">Aucune proposition pour le moment. Elles apparaîtront ici dès que les collègues scanneront en magasin.</p>';
-    return;
+  const actives = propositions.filter((p) => p.statut === 'a_traiter' || p.statut === 'validee');
+  const historique = propositions.filter((p) => p.statut === 'refusee' || p.statut === 'traitee');
+
+  const ENTETE = '<table><thead><tr><th>Type</th><th>Article</th><th>Description</th><th>Demande</th><th>Alertes / infos</th><th>Auteur</th><th>Quand</th><th>Statut</th><th></th></tr></thead><tbody>';
+
+  let html = '';
+  if (!actives.length) {
+    html += '<p class="vide">Rien à traiter — toutes les propositions sont validées, refusées ou traitées. 👌</p>';
+  } else {
+    html += ENTETE + actives.map((p) => {
+      const cle = `data-type="${p.type}" data-code="${ech(p.codeArticle)}"`;
+      const actions = p.statut === 'a_traiter'
+        ? `<button class="btn" style="padding:6px 10px;font-size:12.5px" data-decision="validee" ${cle}>✓ Valider</button>` +
+          `<button class="btn danger" data-decision="refusee" ${cle}>✗ Refuser</button>`
+        : `<button class="btn danger" data-decision="a_traiter" ${cle}>↩ Annuler</button>`;
+      return ligneProposition(p, actions);
+    }).join('') + '</tbody></table>';
   }
-  cible.innerHTML = '<table><thead><tr><th>Article</th><th>Description</th><th>Minimum</th><th>Commentaire</th><th>Auteur</th><th>Quand</th><th>Statut</th><th></th></tr></thead><tbody>' +
-    propositions.map((p) =>
-      '<tr><td>' + ech(p.codeArticle) + '</td>' +
-      '<td>' + ech(p.description) + (p.fournisseur ? '<br><span class="det" style="font-size:11.5px;color:var(--ink-soft)">' + ech(p.fournisseur) + '</span>' : '') + '</td>' +
-      '<td class="fleche">' + p.minActuel + ' → ' + p.minPropose + '</td>' +
-      '<td>' + ech(p.commentaire || '') + '</td>' +
-      '<td>' + ech(p.auteur || '—') + '</td>' +
-      '<td>' + fdatetime(p.majLe) + '</td>' +
-      '<td><span class="badge ' + (p.exportee ? 'exportee' : 'nouvelle') + '">' + (p.exportee ? 'exportée' : 'nouvelle') + '</span></td>' +
-      '<td><button class="btn danger" data-code="' + ech(p.codeArticle) + '">✕</button></td></tr>'
-    ).join('') + '</tbody></table>';
-  cible.querySelectorAll('button[data-code]').forEach((b) =>
+  if (historique.length) {
+    html += '<details><summary>Historique — ' + historique.length + ' proposition(s) traitée(s) ou refusée(s)</summary>' +
+      ENTETE + historique.map((p) => {
+        const cle = `data-type="${p.type}" data-code="${ech(p.codeArticle)}"`;
+        const actions = (p.statut === 'refusee'
+          ? `<button class="btn danger" data-decision="a_traiter" ${cle}>↩ Rouvrir</button>` : '') +
+          `<button class="btn danger" data-suppr ${cle}>✕</button>`;
+        return ligneProposition(p, actions);
+      }).join('') + '</tbody></table></details>';
+  }
+  cible.innerHTML = html;
+
+  cible.querySelectorAll('button[data-decision]').forEach((b) =>
     b.addEventListener('click', async () => {
-      if (!confirm('Supprimer la proposition pour l’article ' + b.dataset.code + ' ?')) return;
-      await appel('/api/proposition-suppr?codeArticle=' + encodeURIComponent(b.dataset.code), { method: 'POST' });
+      let motif = '';
+      if (b.dataset.decision === 'refusee') {
+        motif = (prompt('Motif du refus (obligatoire, visible par le collègue sur le Zebra) :') || '').trim();
+        if (!motif) return;
+      }
+      const rep = await appel('/api/proposition-decision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: b.dataset.type, codeArticle: b.dataset.code, decision: b.dataset.decision, motif }),
+      });
+      if (!rep.ok) alert((await rep.json()).erreur || 'Erreur serveur.');
+      demarrer();
+    }));
+  cible.querySelectorAll('button[data-suppr]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Supprimer définitivement la proposition pour l’article ' + b.dataset.code + ' ?')) return;
+      await appel('/api/proposition-suppr?type=' + b.dataset.type + '&codeArticle=' + encodeURIComponent(b.dataset.code), { method: 'POST' });
       demarrer();
     }));
 }
+
+document.getElementById('btnImportColl').addEventListener('click', async (e) => {
+  const data = await importer('fichierColl', '/api/import/collections', 'resColl', e.target);
+  if (data) {
+    afficherResultat('resColl', true, '✓ ' + data.nbArticles.toLocaleString('fr-BE') + ' articles avec collection, ' +
+      data.nbCollections + ' collections distinctes.' +
+      (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
+    demarrer();
+  }
+});
 
 async function chargerScansInconnus() {
   const rep = await appel('/api/scans-inconnus');
@@ -291,18 +386,18 @@ document.getElementById('btnViderScans').addEventListener('click', async () => {
   chargerScansInconnus();
 });
 
-async function exporter(mode) {
+async function exporter(type, mode) {
   const info = document.getElementById('resExport');
   info.textContent = 'Génération…';
   try {
-    const rep = await appel('/api/export?mode=' + mode);
-    if (rep.status === 404) { info.textContent = 'Aucune proposition à exporter.'; return; }
+    const rep = await appel('/api/export?type=' + type + '&mode=' + mode);
+    if (rep.status === 404) { info.textContent = (await rep.json()).erreur; return; }
     if (!rep.ok) throw new Error('Erreur serveur.');
     const blob = await rep.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = (rep.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'adaptations.xlsx';
+    a.download = (rep.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'export.xlsx';
     a.click();
     URL.revokeObjectURL(url);
     info.textContent = '✓ Fichier téléchargé.';
@@ -311,8 +406,9 @@ async function exporter(mode) {
     info.textContent = e.message;
   }
 }
-document.getElementById('btnExportNouvelles').addEventListener('click', () => exporter('nouvelles'));
-document.getElementById('btnExportToutes').addEventListener('click', () => exporter('toutes'));
+document.getElementById('btnExportMin').addEventListener('click', () => exporter('min', 'validees'));
+document.getElementById('btnExportColl').addEventListener('click', () => exporter('collection', 'validees'));
+document.getElementById('btnExportMinToutes').addEventListener('click', () => exporter('min', 'toutes'));
 
 demarrer();
 </script>

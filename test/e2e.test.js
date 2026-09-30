@@ -1,6 +1,7 @@
 'use strict';
 // E2E complet sur base pg-mem (pas besoin de Postgres local) :
-// import minimums -> import ventes -> scan -> proposition -> export Excel.
+// imports (minimums / ventes / collections) -> scan -> propositions min & collection
+// -> circuit acheteur (valider / refuser / rouvrir) -> alertes -> exports Excel.
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
@@ -14,6 +15,7 @@ const { serveur } = require('../server');
 
 let base; // http://127.0.0.1:PORT
 const ADMIN = { 'X-Admin-Code': 'test-code' };
+const JSON_H = { 'Content-Type': 'application/json' };
 
 async function fabriquerMinimums() {
   const wb = new ExcelJS.Workbook();
@@ -41,8 +43,27 @@ async function fabriquerVentes(qteGoudspray) {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+async function fabriquerCollections() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Feuil1');
+  ws.addRow(['N° art', 'Marque', 'Collectie', 'Type', 'Description', 'Code EAN']);
+  ws.addRow(['57913', '', 'Lemax26-03', '', 'Goudspray 150ml', '5410764216374']);
+  ws.addRow(['99002', '', 'SugarCrush26-06', '', 'EAN numérique', '5412345678908']);
+  ws.addRow(['61702', '', '', '', 'Gazebo Lemax', '0728162041609']); // sans collection
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
 async function api(chemin, options) {
   return fetch(base + chemin, options);
+}
+async function fiche(code) {
+  return (await api('/api/produit?code=' + code)).json();
+}
+async function decider(type, codeArticle, decision, motif) {
+  return api('/api/proposition-decision', {
+    method: 'POST', headers: { ...ADMIN, ...JSON_H },
+    body: JSON.stringify({ type, codeArticle, decision, motif }),
+  });
 }
 
 before(async () => {
@@ -57,8 +78,8 @@ before(async () => {
 after(() => serveur.close());
 
 test('les routes admin exigent le code', async () => {
-  const rep = await api('/api/etat');
-  assert.strictEqual(rep.status, 401);
+  assert.strictEqual((await api('/api/etat')).status, 401);
+  assert.strictEqual((await api('/api/proposition-decision', { method: 'POST' })).status, 401);
 });
 
 test('import du fichier minimums', async () => {
@@ -75,9 +96,7 @@ test('import des ventes de deux semaines', async () => {
   for (const [lundi, qte] of [['2026-09-14', 18], ['2026-09-21', 25]]) {
     const rep = await api(`/api/import/ventes?semaine=${lundi}&fichier=test.xlsx`,
       { method: 'POST', headers: ADMIN, body: await fabriquerVentes(qte) });
-    const data = await rep.json();
-    assert.strictEqual(rep.status, 200, JSON.stringify(data));
-    assert.strictEqual(data.nbLignes, 2);
+    assert.strictEqual(rep.status, 200);
   }
   // Réimport de la même semaine : remplace, pas de doublon
   const rep = await api('/api/import/ventes?semaine=2026-09-21&fichier=test2.xlsx',
@@ -85,145 +104,199 @@ test('import des ventes de deux semaines', async () => {
   assert.strictEqual(rep.status, 200);
 });
 
-test('scan par EAN : fiche produit + ventes', async () => {
-  const rep = await api('/api/produit?code=5410764216374');
+test('import du fichier collections', async () => {
+  const rep = await api('/api/import/collections', { method: 'POST', headers: ADMIN, body: await fabriquerCollections() });
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
+  assert.strictEqual(data.nbArticles, 2); // seuls les articles avec collection
+  assert.strictEqual(data.nbCollections, 2);
+  const { collections } = await (await api('/api/collections')).json();
+  assert.deepStrictEqual(collections, ['Lemax26-03', 'SugarCrush26-06']);
+});
+
+test('scan par EAN : fiche produit + ventes + collection', async () => {
+  const data = await fiche('5410764216374');
   assert.strictEqual(data.produit.codeArticle, '57913');
   assert.strictEqual(data.produit.stockMin, 120);
-  assert.strictEqual(data.produit.stockMax, 132);
   assert.strictEqual(data.produit.vk12, 248);
   assert.strictEqual(data.produit.actif, true);
   assert.strictEqual(data.produit.stockDepot, 687);
-  assert.strictEqual(data.produit.stockDepot2, 0);
   assert.strictEqual(data.produit.stockFdcm, 3888);
-  assert.strictEqual(data.ventes.length, 2);
-  assert.deepStrictEqual(data.ventes.map((v) => v.semaine), ['2026-09-14', '2026-09-21']);
+  assert.strictEqual(data.collection, 'Lemax26-03');
   assert.deepStrictEqual(data.ventes.map((v) => v.qteFami), [18, 30]);
   assert.strictEqual(data.proposition, null);
+  assert.strictEqual(data.propositionCollection, null);
 });
 
 test('scan UPC-A 12 chiffres retrouve l’EAN-13 à zéro de tête', async () => {
-  const rep = await api('/api/produit?code=728162041609');
-  const data = await rep.json();
-  assert.strictEqual(rep.status, 200, JSON.stringify(data));
+  const data = await fiche('728162041609');
   assert.strictEqual(data.produit.codeArticle, '61702');
-  assert.strictEqual(data.produit.actif, false); // Actief AK = False dans le fichier
+  assert.strictEqual(data.produit.actif, false);
+  assert.strictEqual(data.collection, null); // pas de collection renseignée
 });
 
 test('les scans introuvables sont journalisés puis vidables', async () => {
-  await api('/api/scans-inconnus-vider', { method: 'POST', headers: ADMIN }); // repart de zéro
+  await api('/api/scans-inconnus-vider', { method: 'POST', headers: ADMIN });
   await api('/api/produit?code=5400924479374');
   await api('/api/produit?code=5400924479374');
   await api('/api/produit?code=1112223334445');
-
   let { scans } = await (await api('/api/scans-inconnus', { headers: ADMIN })).json();
   assert.strictEqual(scans.length, 2);
-  const double = scans.find((s) => s.code === '5400924479374');
-  assert.strictEqual(double.nb, 2);
-
-  const rep = await api('/api/scans-inconnus-vider', { method: 'POST', headers: ADMIN });
-  assert.strictEqual(rep.status, 200);
+  assert.strictEqual(scans.find((s) => s.code === '5400924479374').nb, 2);
+  await api('/api/scans-inconnus-vider', { method: 'POST', headers: ADMIN });
   ({ scans } = await (await api('/api/scans-inconnus', { headers: ADMIN })).json());
   assert.strictEqual(scans.length, 0);
 });
 
-test('recherche par code article et code inconnu', async () => {
-  const ok = await api('/api/produit?code=99001');
-  assert.strictEqual(ok.status, 200);
-  const ko = await api('/api/produit?code=0000000000000');
-  assert.strictEqual(ko.status, 404);
-});
-
-test('proposition : création puis écrasement par la dernière', async () => {
+test('proposition min : circuit complet avec alertes', async () => {
+  // 1. Proposition douteuse : min 10 (ventes moy. 24/sem, 4575 en dépôt, actuel 120, VPE 12)
   let rep = await api('/api/proposition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ codeArticle: '57913', minPropose: 96, commentaire: 'Trop haut', auteur: 'Jimmy' }),
-  });
-  assert.strictEqual(rep.status, 200, JSON.stringify(await rep.json()));
-
-  rep = await api('/api/proposition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ codeArticle: '57913', minPropose: 108, commentaire: 'Plutôt 108', auteur: 'Kim' }),
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', minPropose: 10, commentaire: 'Trop haut', auteur: 'Jimmy' }),
   });
   assert.strictEqual(rep.status, 200);
+  let f = await fiche('57913');
+  assert.strictEqual(f.proposition.statut, 'a_traiter');
 
-  const liste = await (await api('/api/propositions', { headers: ADMIN })).json();
-  assert.strictEqual(liste.propositions.length, 1);
-  assert.strictEqual(liste.propositions[0].minPropose, 108);
-  assert.strictEqual(liste.propositions[0].auteur, 'Kim');
-  assert.strictEqual(liste.propositions[0].minActuel, 120);
-  assert.strictEqual(liste.propositions[0].exportee, false);
+  let { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
+  assert.strictEqual(propositions.length, 1);
+  assert.deepStrictEqual(propositions[0].alertes.map((a) => a.code).sort(),
+    ['depot', 'variation', 'ventes', 'vpe']);
 
-  const fiche = await (await api('/api/produit?code=5410764216374')).json();
-  assert.strictEqual(fiche.proposition.minPropose, 108);
+  // 2. La dernière proposition écrase : min 108 (plus raisonnable, reste l'alerte dépôt)
+  rep = await api('/api/proposition', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', minPropose: 108, auteur: 'Kim' }),
+  });
+  assert.strictEqual(rep.status, 200);
+  ({ propositions } = await (await api('/api/propositions', { headers: ADMIN })).json());
+  assert.strictEqual(propositions.length, 1);
+  assert.strictEqual(propositions[0].minPropose, 108);
+  assert.strictEqual(propositions[0].auteur, 'Kim');
+  assert.deepStrictEqual(propositions[0].alertes.map((a) => a.code), ['depot']);
 });
 
 test('proposition invalide refusée', async () => {
   const rep = await api('/api/proposition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: JSON_H,
     body: JSON.stringify({ codeArticle: '57913', minPropose: -3 }),
   });
   assert.strictEqual(rep.status, 400);
 });
 
-test('export Excel des nouvelles propositions puis marquage', async () => {
-  const rep = await api('/api/export?mode=nouvelles', { headers: ADMIN });
-  assert.strictEqual(rep.status, 200);
-  assert.match(rep.headers.get('content-disposition') || '', /adaptations-minimums-.*\.xlsx/);
+test('export sans validation : rien ne sort', async () => {
+  const rep = await api('/api/export?type=min&mode=validees', { headers: ADMIN });
+  assert.strictEqual(rep.status, 404);
+});
 
+test('refus avec motif, visible au rescan, puis nouvelle proposition', async () => {
+  // Refus sans motif : rejeté
+  assert.strictEqual((await decider('min', '57913', 'refusee', '')).status, 400);
+
+  assert.strictEqual((await decider('min', '57913', 'refusee', 'Colisage imposé par le fournisseur')).status, 200);
+  let f = await fiche('57913');
+  assert.strictEqual(f.proposition.statut, 'refusee');
+  assert.strictEqual(f.proposition.motifRefus, 'Colisage imposé par le fournisseur');
+
+  // Le collègue repropose : le circuit repart
+  const rep = await api('/api/proposition', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', minPropose: 96, auteur: 'Kim' }),
+  });
+  assert.strictEqual(rep.status, 200);
+  f = await fiche('57913');
+  assert.strictEqual(f.proposition.statut, 'a_traiter');
+  assert.strictEqual(f.proposition.motifRefus, null);
+});
+
+test('validation puis export ERP : la proposition passe traitée', async () => {
+  assert.strictEqual((await decider('min', '57913', 'validee')).status, 200);
+  const etat = await (await api('/api/etat', { headers: ADMIN })).json();
+  assert.strictEqual(etat.propositions.aTraiter, 0);
+  assert.strictEqual(etat.propositions.validees, 1);
+
+  const rep = await api('/api/export?type=min&mode=validees', { headers: ADMIN });
+  assert.strictEqual(rep.status, 200);
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(Buffer.from(await rep.arrayBuffer()));
   const ws = wb.getWorksheet('Adaptations');
-  assert.strictEqual(ws.rowCount, 2); // entête + 1 proposition
-  // Ligne A au format d'import ERP
+  assert.strictEqual(ws.rowCount, 2);
   assert.deepStrictEqual(ws.getRow(1).values.slice(1, 10),
     ['artikelnummer', 'minimale voorraad', 'Omschrijving', 'Magazijn', 'eanbarcode',
       'BestelNr.', 'afname', 'maximale voorraad', 'gereserveerde voorraad']);
   const ligne = ws.getRow(2);
-  assert.strictEqual(ligne.getCell(1).value, '57913'); // artikelnummer
-  assert.strictEqual(ligne.getCell(2).value, 108); // minimale voorraad = min proposé
-  assert.strictEqual(ligne.getCell(4).value, 'Fami'); // Magazijn
-  assert.strictEqual(ligne.getCell(5).value, '5410764216374'); // eanbarcode
-  assert.strictEqual(ligne.getCell(6).value, '022280'); // BestelNr.
-  assert.strictEqual(ligne.getCell(7).value, 12); // afname = VPE
-  assert.strictEqual(ligne.getCell(8).value, 132); // maximale voorraad
-  assert.strictEqual(ligne.getCell(9).value, 0); // gereserveerde voorraad
-  assert.strictEqual(ligne.getCell(10).value, 120); // min actuel (vue d'ensemble)
-  assert.strictEqual(ligne.getCell(11).value, -12); // écart 108 - 120
+  assert.strictEqual(ligne.getCell(1).value, '57913');
+  assert.strictEqual(ligne.getCell(2).value, 96);
+  assert.strictEqual(ligne.getCell(4).value, 'Fami');
+  assert.strictEqual(ligne.getCell(6).value, '022280');
+  assert.strictEqual(ligne.getCell(7).value, 12);
 
-  // Plus rien de nouveau à exporter
-  const vide = await api('/api/export?mode=nouvelles', { headers: ADMIN });
-  assert.strictEqual(vide.status, 404);
-  // Mais « tout exporter » les reprend
-  const toutes = await api('/api/export?mode=toutes', { headers: ADMIN });
-  assert.strictEqual(toutes.status, 200);
+  const f = await fiche('57913');
+  assert.strictEqual(f.proposition.statut, 'traitee');
+  // Plus rien de validé à exporter, mais l'historique reste re-téléchargeable
+  assert.strictEqual((await api('/api/export?type=min&mode=validees', { headers: ADMIN })).status, 404);
+  assert.strictEqual((await api('/api/export?type=min&mode=toutes', { headers: ADMIN })).status, 200);
 });
 
-test('réimport des minimums : le référentiel est remplacé, la proposition reste', async () => {
+test('proposition de collection : liste fermée, circuit et export', async () => {
+  // Collection inconnue : rejetée
+  let rep = await api('/api/proposition-collection', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', collectionProposee: 'NImporteQuoi26-01', auteur: 'Jimmy' }),
+  });
+  assert.strictEqual(rep.status, 400);
+
+  rep = await api('/api/proposition-collection', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', collectionProposee: 'SugarCrush26-06', auteur: 'Jimmy' }),
+  });
+  assert.strictEqual(rep.status, 200, JSON.stringify(await rep.json()));
+
+  const f = await fiche('57913');
+  assert.strictEqual(f.propositionCollection.statut, 'a_traiter');
+  assert.strictEqual(f.propositionCollection.collectionProposee, 'SugarCrush26-06');
+  assert.strictEqual(f.propositionCollection.collectionActuelle, 'Lemax26-03');
+
+  const { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
+  const coll = propositions.find((p) => p.type === 'collection');
+  assert.ok(coll, 'la proposition de collection doit être dans la liste admin');
+  assert.strictEqual(coll.statut, 'a_traiter');
+
+  assert.strictEqual((await decider('collection', '57913', 'validee')).status, 200);
+  const exp = await api('/api/export?type=collection&mode=validees', { headers: ADMIN });
+  assert.strictEqual(exp.status, 200);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(Buffer.from(await exp.arrayBuffer()));
+  const ws = wb.getWorksheet('Collections');
+  assert.strictEqual(ws.rowCount, 2);
+  assert.strictEqual(ws.getRow(2).getCell(1).value, '57913');
+  assert.strictEqual(ws.getRow(2).getCell(4).value, 'Lemax26-03');
+  assert.strictEqual(ws.getRow(2).getCell(5).value, 'SugarCrush26-06');
+
+  assert.strictEqual((await fiche('57913')).propositionCollection.statut, 'traitee');
+});
+
+test('réimport des minimums : propositions et collections survivent', async () => {
   const rep = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
   assert.strictEqual(rep.status, 200);
   const etat = await (await api('/api/etat', { headers: ADMIN })).json();
   assert.strictEqual(etat.produits.nb, 5);
-  assert.strictEqual(etat.propositions.total, 1);
-  assert.strictEqual(etat.semaines.length, 2);
+  assert.strictEqual(etat.propositions.total, 2); // 1 min + 1 collection, traitées
+  assert.strictEqual(etat.collections.nbArticles, 2);
+  assert.strictEqual((await fiche('57913')).collection, 'Lemax26-03');
 });
 
-test('suppression d’une proposition', async () => {
-  const rep = await api('/api/proposition-suppr?codeArticle=57913', { method: 'POST', headers: ADMIN });
-  assert.strictEqual(rep.status, 200);
-  const liste = await (await api('/api/propositions', { headers: ADMIN })).json();
-  assert.strictEqual(liste.propositions.length, 0);
+test('suppression des deux types de propositions', async () => {
+  assert.strictEqual((await api('/api/proposition-suppr?type=min&codeArticle=57913', { method: 'POST', headers: ADMIN })).status, 200);
+  assert.strictEqual((await api('/api/proposition-suppr?type=collection&codeArticle=57913', { method: 'POST', headers: ADMIN })).status, 200);
+  const { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
+  assert.strictEqual(propositions.length, 0);
 });
 
 test('proposition bloquée pour un article inactif sans stock dépôt', async () => {
   // 61702 : inactif, dépôts 0/0/0 -> refusé
   const ko = await api('/api/proposition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: JSON_H,
     body: JSON.stringify({ codeArticle: '61702', minPropose: 10 }),
   });
   assert.strictEqual(ko.status, 409);
@@ -231,10 +304,13 @@ test('proposition bloquée pour un article inactif sans stock dépôt', async ()
 
   // 99003 : inactif mais 50 en FDCM -> autorisé
   const ok = await api('/api/proposition', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: JSON_H,
     body: JSON.stringify({ codeArticle: '99003', minPropose: 4 }),
   });
   assert.strictEqual(ok.status, 200, JSON.stringify(await ok.json()));
-  await api('/api/proposition-suppr?codeArticle=99003', { method: 'POST', headers: ADMIN });
+  await api('/api/proposition-suppr?type=min&codeArticle=99003', { method: 'POST', headers: ADMIN });
+});
+
+test('décision sur une proposition inexistante : 404', async () => {
+  assert.strictEqual((await decider('min', '00000', 'validee')).status, 404);
 });

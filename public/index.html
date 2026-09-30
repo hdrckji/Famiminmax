@@ -49,7 +49,7 @@
   .fiche{background:var(--card);border:2px solid var(--bord);border-radius:16px;padding:16px;margin-bottom:12px}
   .fiche h2{margin:0 0 2px;font-size:19px;font-weight:700;line-height:1.25}
   .fiche .ref{font-size:12.5px;color:var(--ink-soft);margin-bottom:12px}
-  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:6px}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
   .stat{background:var(--card-2);border:1.5px solid var(--bord);border-radius:12px;padding:8px 6px;text-align:center}
   .stat b{display:block;font-size:22px;font-weight:800;line-height:1.15}
   .stat span{font-size:10.5px;color:var(--ink-soft);font-weight:500;text-transform:uppercase;letter-spacing:.04em}
@@ -84,6 +84,11 @@
   .proposer h3{margin:0 0 10px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft)}
   .encours{background:var(--lichtgroen-bg);border:1.5px solid var(--lichtgroen);border-radius:10px;
     padding:9px 12px;font-size:13.5px;margin-bottom:12px}
+  .encours.refus{background:var(--rouge-bg);border-color:var(--rouge);color:#9c3547}
+  .encours.attente{background:#fdf6e3;border-color:#e6d3a0;color:#5c4a1a}
+  .aide{font-size:12.5px;color:var(--ink-soft);margin:-4px 0 10px}
+  .collec-actuelle{font-size:14px;margin:0 0 10px}
+  .collec-actuelle b{font-size:16px}
   .stepper{display:flex;align-items:center;gap:10px;margin-bottom:12px}
   .stepper button{width:56px;height:56px;font-size:28px;font-weight:700;border-radius:14px;cursor:pointer;
     border:2px solid var(--donkergroen);background:#fff;color:var(--donkergroen)}
@@ -161,6 +166,30 @@ document.getElementById('formScan').addEventListener('submit', (e) => {
   if (code) chercher(code);
 });
 
+let listeCollections = null;
+async function chargerCollections() {
+  if (listeCollections !== null) return listeCollections;
+  try {
+    const rep = await fetch('/api/collections');
+    listeCollections = (await rep.json()).collections || [];
+  } catch {
+    listeCollections = [];
+  }
+  return listeCollections;
+}
+
+// Bannière d'état d'une demande dans le circuit de validation de l'acheteur.
+function banniereStatut(prop, resume) {
+  const s = prop.statut || 'a_traiter';
+  if (s === 'refusee') {
+    return '<div class="encours refus">✗ ' + resume + ' — <b>refusée</b>' +
+      (prop.motifRefus ? ' : ' + ech(prop.motifRefus) : '') + '<br>Vous pouvez faire une nouvelle proposition.</div>';
+  }
+  if (s === 'validee') return '<div class="encours">✓ ' + resume + ' — <b>validée par l\'acheteur</b>, en cours de traitement.</div>';
+  if (s === 'traitee') return '<div class="encours">✓ ' + resume + ' — <b>traitée</b>, adaptée dans l\'ERP.</div>';
+  return '<div class="encours attente">⏳ ' + resume + ' — en attente de validation par l\'acheteur.</div>';
+}
+
 async function chercher(code) {
   zone.innerHTML = '<p class="msg info">Recherche…</p>';
   try {
@@ -168,6 +197,7 @@ async function chercher(code) {
     const data = await rep.json();
     if (!rep.ok) { zone.innerHTML = '<p class="msg err">' + ech(data.erreur) + '</p>'; refocus(); return; }
     if (data.choix) { afficherChoix(data.choix); refocus(); return; }
+    await chargerCollections();
     afficherFiche(data);
   } catch {
     zone.innerHTML = '<p class="msg err">Serveur injoignable. Vérifiez le réseau et réessayez.</p>';
@@ -218,9 +248,25 @@ function afficherFiche(data) {
   const prop = data.proposition;
   const valeurInitiale = prop ? prop.minPropose : p.stockMin;
   const enCours = prop
-    ? '<div class="encours">💡 Proposition en cours : <b>' + prop.minPropose + '</b>' +
-      (prop.auteur ? ' (par ' + ech(prop.auteur) + ')' : '') +
-      (prop.exportee ? ' — déjà exportée' : ' — pas encore exportée') + '</div>'
+    ? banniereStatut(prop, 'Min proposé : <b>' + prop.minPropose + '</b>' +
+        (prop.auteur ? ' (par ' + ech(prop.auteur) + ')' : ''))
+    : '';
+
+  const propColl = data.propositionCollection;
+  const enCoursColl = propColl
+    ? banniereStatut(propColl, 'Collection proposée : <b>' + ech(propColl.collectionProposee) + '</b>' +
+        (propColl.auteur ? ' (par ' + ech(propColl.auteur) + ')' : ''))
+    : '';
+  const blocCollection = (data.collection != null || listeCollections.length)
+    ? '<div class="proposer"><h3>Collection</h3>' +
+      '<p class="collec-actuelle">Collection actuelle : <b>' + (data.collection ? ech(data.collection) : '—') + '</b></p>' +
+      enCoursColl +
+      (listeCollections.length
+        ? '<input class="auteur" id="collChoix" list="listeColl" placeholder="Nouvelle collection (tapez pour chercher)…" />' +
+          '<datalist id="listeColl">' + listeCollections.map((c) => '<option value="' + ech(c) + '"></option>').join('') + '</datalist>' +
+          '<button class="btn-valider" id="validerColl">Proposer le changement de collection</button>'
+        : '<p class="aide">Liste des collections indisponible — importez le fichier collections dans l\'admin.</p>') +
+      '</div>'
     : '';
 
   const badge = p.actif === false
@@ -239,7 +285,6 @@ function afficherFiche(data) {
       '<div class="stats">' +
         '<div class="stat min"><b>' + p.stockMin + '</b><span>Min rayon</span></div>' +
         '<div class="stat' + (stockAlerte ? ' alerte' : '') + '"><b>' + p.stock + '</b><span>Stock</span></div>' +
-        '<div class="stat"><b>' + p.stockMax + '</b><span>Max</span></div>' +
         '<div class="stat"><b>' + (p.vpe == null ? '—' : p.vpe) + '</b><span>VPE</span></div>' +
       '</div>' +
       (depots.length ? '<p class="contexte">Stock dépôt — ' + depots.join(' · ') + '</p>' : '') +
@@ -249,7 +294,9 @@ function afficherFiche(data) {
     (bloque
       ? '<div class="proposer"><h3>Proposition désactivée</h3>' +
         '<p class="msg info" style="margin:0">Article <b>inactif</b> sans stock dépôt : il est en fin de vie, son minimum rayon ne doit plus être adapté.</p></div>'
-      : '<div class="proposer"><h3>Proposer une adaptation du minimum</h3>' + enCours +
+      : '<div class="proposer"><h3>Proposer une adaptation du minimum</h3>' +
+      '<p class="aide">Le minimum = la <b>capacité du rayon plein</b> : indiquez combien de pièces tiennent dans le rayon.</p>' +
+      enCours +
       '<div class="stepper">' +
         '<button type="button" id="moins">−</button>' +
         '<input id="nouveauMin" type="number" min="0" max="100000" step="1" value="' + valeurInitiale + '" />' +
@@ -258,8 +305,10 @@ function afficherFiche(data) {
       '<textarea id="commentaire" maxlength="500" placeholder="Commentaire (facultatif)"></textarea>' +
       '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (facultatif)" />' +
       '<button class="btn-valider" id="valider">Envoyer la proposition</button>' +
-      '</div>');
+      '</div>') +
+    blocCollection;
 
+  brancherCollection(p);
   if (bloque) { refocus(); return; }
 
   const nouveauMin = document.getElementById('nouveauMin');
@@ -301,6 +350,35 @@ function afficherFiche(data) {
     }
   });
   refocus();
+}
+
+// Branche le bouton de proposition de changement de collection (s'il est affiché).
+function brancherCollection(p) {
+  const btn = document.getElementById('validerColl');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const choix = document.getElementById('collChoix').value.trim();
+    if (!choix) { toast('Choisissez une collection dans la liste.', true); return; }
+    if (!listeCollections.includes(choix)) { toast('Collection inconnue : choisissez-la dans la liste.', true); return; }
+    const auteurEl = document.getElementById('auteur');
+    const auteur = (auteurEl ? auteurEl.value.trim() : '') || localStorage.getItem('famiminmax_auteur') || '';
+    if (auteur) localStorage.setItem('famiminmax_auteur', auteur);
+    btn.disabled = true;
+    try {
+      const rep = await fetch('/api/proposition-collection', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ codeArticle: p.codeArticle, collectionProposee: choix, auteur }),
+      });
+      const data = await rep.json();
+      if (!rep.ok) throw new Error(data.erreur || 'Erreur serveur.');
+      toast('✓ Changement de collection proposé : ' + choix);
+      chercher(p.codeArticle);
+    } catch (e) {
+      toast(e.message, true);
+      btn.disabled = false;
+    }
+  });
 }
 </script>
 </body>

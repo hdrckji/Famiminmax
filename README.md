@@ -1,29 +1,45 @@
 # Famiminmax
 
-Consultation et adaptation des **minimums rayon** en magasin, via scan sur Zebra TC26.
+Consultation et adaptation des **minimums rayon** et des **collections** en magasin,
+via scan sur Zebra TC26.
 
-L'ERP ne permet pas de voir le minimum rayon paramétré par produit. Famiminmax comble ce trou :
-les collègues scannent un produit en magasin, voient le minimum paramétré, le stock, et les ventes
-des 5 dernières semaines, puis proposent une adaptation. Les propositions sont récupérées en Excel
-depuis la page admin pour être réinjectées dans l'ERP.
+L'ERP ne permet pas de voir le minimum rayon paramétré par produit, ni de changer la
+collection depuis un Zebra. Famiminmax comble ce trou : les collègues scannent un produit,
+voient le minimum (= capacité du rayon plein), le stock, les ventes des 5 dernières semaines
+et la collection, puis proposent une adaptation. L'acheteur valide ou refuse (motif visible
+au rescan), et exporte les propositions validées en Excel au format d'import ERP.
 
 ## Écrans
 
 - **`/` — page scan (TC26)** : champ de scan toujours actif (le TC26 scanne en mode clavier dans
-  Chrome, aucune app à installer). Affiche la fiche produit : minimum rayon, stock, max, VPE,
-  ventes 12 mois (VK-12) et graphique des ventes Fami des 5 dernières semaines. Formulaire de
-  proposition avec pas d'incrément = VPE. Une seule proposition par produit : la dernière écrase
-  la précédente.
-- **`/admin` — administration (PC)** : protégée par code d'accès. Import du fichier minimums,
-  import des ventes hebdomadaires, tableau des propositions, export Excel (les propositions
-  exportées sont marquées pour ne pas être retraitées).
+  Chrome, aucune app à installer). Fiche produit : minimum rayon, stock, VPE, stocks dépôt,
+  badge actif/inactif, VK-12, graphique des ventes Fami des 5 dernières semaines, collection
+  actuelle. Deux formulaires de proposition : nouveau minimum (pas d'incrément = VPE) et
+  changement de collection (liste fermée avec recherche). Une seule proposition par produit et
+  par type : la dernière écrase la précédente et repart au début du circuit. Le collègue voit
+  l'état de sa demande en rescannant (en attente / validée / traitée / refusée + motif).
+  Article inactif sans stock dépôt = proposition de minimum désactivée.
+- **`/admin` — administration (PC)** : protégée par code d'accès. Imports (minimums, ventes,
+  collections), journal des scans non reconnus, et tableau des propositions avec **alertes de
+  fiabilité** et actions ✓ Valider / ✗ Refuser (motif obligatoire). L'export ne sort que les
+  propositions **validées** et les passe « traitées » ; l'historique reste consultable.
+
+## Alertes de fiabilité (propositions de minimum)
+
+| Alerte | Déclencheur | Seuil (variable d'env.) |
+|---|---|---|
+| ⚠ ventes | min proposé < ventes moyennes hebdo × N | `SEUIL_COUVERTURE_SEMAINES` (défaut 1) |
+| ⚠ dépôt | stock dépôts ≥ N × min proposé (et ≥ plancher) | `SEUIL_RATIO_DEPOT` (5), `SEUIL_DEPOT_MIN` (24) |
+| ⚠ écart | min proposé ×N ou ÷N par rapport à l'actuel | `SEUIL_VARIATION` (5) |
+| ⚠ VPE | min proposé non multiple du VPE | — |
 
 ## Fichiers attendus
 
 | Import | Source ERP | Colonnes clés |
 |---|---|---|
-| Minimums rayon | Export type « Beta4 », feuille `Export` | `Article`, `EAN barcode`, `Minimale Stock`, `Maximale Stock`, `Stock`, `VPE`, `VK-12`, `Fournisseur` |
+| Minimums rayon | Export type « Beta4 », feuille `Export` | `Article`, `EAN barcode`, `Minimale Stock`, `Stock`, `VPE`, `VK-12`, `Actief AK`, `FDepot`, `FDepot2`, `FDCM` |
 | Ventes d'une semaine | Export hebdo agrégé | `Artikelnummer`, `EANBarcode`, `Aantal`, `Fami (#)` |
+| Collections | Export type « noel collection » | `N° art`, `Code EAN`, `Collectie` |
 
 Les colonnes sont repérées par leur intitulé (l'ordre n'a pas d'importance). Un article présent
 sur plusieurs lignes de ventes est cumulé. Les EAN scannés en UPC-A (12 chiffres) retrouvent
@@ -31,10 +47,11 @@ automatiquement l'EAN-13 à zéro de tête.
 
 ## Routine hebdomadaire
 
-1. Exporter depuis l'ERP le fichier minimums et le fichier des ventes de la semaine écoulée.
-2. Sur `/admin` : importer les deux (choisir le **lundi** de la semaine pour les ventes).
-3. Récupérer les propositions : « Exporter les nouvelles » → fichier
-   `adaptations-minimums-AAAA-MM-JJ.xlsx` → adapter les minimums dans l'ERP.
+1. Exporter depuis l'ERP : minimums, ventes de la semaine écoulée, collections.
+2. Sur `/admin` : importer les trois (choisir le **lundi** de la semaine pour les ventes).
+3. Traiter les propositions : valider / refuser, puis « Minimums validés (format ERP) » →
+   fichier `adaptations-minimums-AAAA-MM-JJ.xlsx` → import dans l'ERP. Idem pour les
+   collections (format provisoire, à caler sur l'ERP).
 
 ## Déploiement Railway
 

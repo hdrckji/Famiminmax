@@ -6,12 +6,21 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const db = require('./lib/db');
-const { parserMinimums, parserVentes, candidatsScan } = require('./lib/parseurs');
-const { genererExportPropositions } = require('./lib/export');
+const { parserMinimums, parserVentes, parserCollections, candidatsScan } = require('./lib/parseurs');
+const { genererExportPropositions, genererExportCollections } = require('./lib/export');
 
 const PORT = process.env.PORT || 3000;
 const ADMIN_CODE = process.env.ADMIN_CODE || '';
 const MAX_UPLOAD = 30 * 1024 * 1024;
+
+// Seuils des alertes de fiabilité (surchargeables par variables d'environnement).
+const SEUILS = {
+  couvertureSemaines: Number(process.env.SEUIL_COUVERTURE_SEMAINES) || 1,
+  ratioDepot: Number(process.env.SEUIL_RATIO_DEPOT) || 5,
+  depotMin: Number(process.env.SEUIL_DEPOT_MIN) || 24,
+  variation: Number(process.env.SEUIL_VARIATION) || 5,
+};
+
 
 const MIMES = {
   '.html': 'text/html; charset=utf-8',
@@ -98,6 +107,8 @@ async function apiProduit(req, res, url) {
     [p.code_article]
   );
   const prop = await db.requete('SELECT * FROM propositions WHERE code_article = $1', [p.code_article]);
+  const coll = await db.requete('SELECT collection FROM collections_articles WHERE code_article = $1', [p.code_article]);
+  const propColl = await db.requete('SELECT * FROM propositions_collection WHERE code_article = $1', [p.code_article]);
 
   json(res, 200, {
     produit: {
@@ -124,6 +135,7 @@ async function apiProduit(req, res, url) {
         qteFami: v.qte_fami == null ? 0 : Number(v.qte_fami),
       }))
       .reverse(),
+    collection: coll.rows.length ? coll.rows[0].collection : null,
     proposition: prop.rows.length
       ? {
           minPropose: prop.rows[0].min_propose,
@@ -131,7 +143,18 @@ async function apiProduit(req, res, url) {
           commentaire: prop.rows[0].commentaire,
           auteur: prop.rows[0].auteur,
           majLe: prop.rows[0].maj_le,
-          exportee: prop.rows[0].exporte_le != null,
+          statut: prop.rows[0].statut,
+          motifRefus: prop.rows[0].motif_refus,
+        }
+      : null,
+    propositionCollection: propColl.rows.length
+      ? {
+          collectionProposee: propColl.rows[0].collection_proposee,
+          collectionActuelle: propColl.rows[0].collection_actuelle,
+          auteur: propColl.rows[0].auteur,
+          majLe: propColl.rows[0].maj_le,
+          statut: propColl.rows[0].statut,
+          motifRefus: propColl.rows[0].motif_refus,
         }
       : null,
   });
@@ -166,27 +189,139 @@ async function apiProposer(req, res) {
   const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
 
   // Une seule proposition par produit : la dernière écrase la précédente
-  // et redevient « à exporter ».
+  // et repart au début du circuit de validation.
   await db.requete(
     `INSERT INTO propositions (code_article, ean, description, min_actuel, min_propose, commentaire, auteur)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
      ON CONFLICT (code_article) DO UPDATE SET
        ean = EXCLUDED.ean, description = EXCLUDED.description, min_actuel = EXCLUDED.min_actuel,
        min_propose = EXCLUDED.min_propose, commentaire = EXCLUDED.commentaire, auteur = EXCLUDED.auteur,
+       statut = 'a_traiter', motif_refus = NULL, decide_le = NULL,
        maj_le = now(), exporte_le = NULL`,
     [codeArticle, p.ean, p.description, p.stock_min, minPropose, commentaire, auteur]
   );
   json(res, 200, { ok: true });
 }
 
-async function apiPropositions(req, res) {
+async function apiProposerCollection(req, res) {
+  let corps;
+  try {
+    corps = JSON.parse((await lireCorps(req, 64 * 1024)).toString('utf8'));
+  } catch {
+    return json(res, 400, { erreur: 'Corps JSON invalide.' });
+  }
+  const codeArticle = String(corps.codeArticle || '').trim();
+  const collectionProposee = String(corps.collectionProposee || '').trim();
+  if (!codeArticle) return json(res, 400, { erreur: 'codeArticle manquant.' });
+  if (!collectionProposee) return json(res, 400, { erreur: 'Choisissez une collection.' });
+
+  const r = await db.requete('SELECT * FROM produits WHERE code_article = $1', [codeArticle]);
+  if (!r.rows.length) return json(res, 404, { erreur: 'Produit inconnu.' });
+  const p = r.rows[0];
+
+  const connue = await db.requete('SELECT 1 FROM collections WHERE nom = $1', [collectionProposee]);
+  if (!connue.rows.length) {
+    return json(res, 400, { erreur: `Collection inconnue : « ${collectionProposee} ». Choisissez-la dans la liste.` });
+  }
+  const actuelle = await db.requete('SELECT collection FROM collections_articles WHERE code_article = $1', [codeArticle]);
+
+  const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
+  await db.requete(
+    `INSERT INTO propositions_collection (code_article, ean, description, collection_actuelle, collection_proposee, auteur)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (code_article) DO UPDATE SET
+       ean = EXCLUDED.ean, description = EXCLUDED.description,
+       collection_actuelle = EXCLUDED.collection_actuelle, collection_proposee = EXCLUDED.collection_proposee,
+       auteur = EXCLUDED.auteur, statut = 'a_traiter', motif_refus = NULL, decide_le = NULL,
+       maj_le = now(), exporte_le = NULL`,
+    [codeArticle, p.ean, p.description, actuelle.rows.length ? actuelle.rows[0].collection : null, collectionProposee, auteur]
+  );
+  json(res, 200, { ok: true });
+}
+
+// Décision de l'acheteur : valider / refuser (motif obligatoire) / rouvrir.
+async function apiDecision(req, res) {
+  let corps;
+  try {
+    corps = JSON.parse((await lireCorps(req, 64 * 1024)).toString('utf8'));
+  } catch {
+    return json(res, 400, { erreur: 'Corps JSON invalide.' });
+  }
+  const table = corps.type === 'collection' ? 'propositions_collection' : 'propositions';
+  const codeArticle = String(corps.codeArticle || '').trim();
+  const decision = String(corps.decision || '');
+  const motif = String(corps.motif || '').trim().slice(0, 300);
+  if (!codeArticle) return json(res, 400, { erreur: 'codeArticle manquant.' });
+  if (!['validee', 'refusee', 'a_traiter'].includes(decision)) {
+    return json(res, 400, { erreur: 'Décision invalide (validee / refusee / a_traiter).' });
+  }
+  if (decision === 'refusee' && !motif) {
+    return json(res, 400, { erreur: 'Le motif est obligatoire pour un refus.' });
+  }
+
   const r = await db.requete(
-    `SELECT pr.*, p.fournisseur, p.stock_min AS min_courant
+    `UPDATE ${table}
+        SET statut = $1,
+            motif_refus = $2,
+            decide_le = ${decision === 'a_traiter' ? 'NULL' : 'now()'}
+      WHERE code_article = $3`,
+    [decision, decision === 'refusee' ? motif : null, codeArticle]
+  );
+  if (!r.rowCount) return json(res, 404, { erreur: 'Proposition introuvable.' });
+  json(res, 200, { ok: true });
+}
+
+// Ventes Fami moyennes par semaine (sur les 5 dernières semaines importées).
+async function ventesMoyennes() {
+  const semaines = await db.requete('SELECT debut FROM semaines_ventes ORDER BY debut DESC LIMIT 5');
+  if (!semaines.rows.length) return { nbSemaines: 0, parCode: new Map() };
+  const placeholders = semaines.rows.map((_, i) => `$${i + 1}`).join(',');
+  const r = await db.requete(
+    `SELECT code_article, SUM(qte_fami) AS tot FROM lignes_ventes
+      WHERE semaine IN (${placeholders}) GROUP BY code_article`,
+    semaines.rows.map((s) => s.debut)
+  );
+  const parCode = new Map();
+  for (const l of r.rows) parCode.set(l.code_article, Number(l.tot) / semaines.rows.length);
+  return { nbSemaines: semaines.rows.length, parCode };
+}
+
+// Drapeaux de fiabilité d'une proposition de minimum, pour l'acheteur.
+function calculerAlertes(x, ventesMoy) {
+  const alertes = [];
+  const min = x.min_propose;
+  if (ventesMoy != null && ventesMoy > 0 && min < SEUILS.couvertureSemaines * ventesMoy) {
+    alertes.push({ code: 'ventes', detail: `Min ${min} < ventes moyennes ${Math.round(ventesMoy * 10) / 10}/sem` });
+  }
+  const depot = (x.stock_depot || 0) + (x.stock_depot2 || 0) + (x.stock_fdcm || 0);
+  if (depot >= SEUILS.depotMin && depot >= SEUILS.ratioDepot * min) {
+    alertes.push({ code: 'depot', detail: `${depot} pièces en dépôt pour un min de ${min}` });
+  }
+  if (x.min_actuel > 0 && (min >= SEUILS.variation * x.min_actuel || min * SEUILS.variation <= x.min_actuel)) {
+    alertes.push({ code: 'variation', detail: `Passage de ${x.min_actuel} à ${min}` });
+  }
+  if (x.vpe > 1 && min % x.vpe !== 0) {
+    alertes.push({ code: 'vpe', detail: `${min} n'est pas un multiple du VPE (${x.vpe})` });
+  }
+  return alertes;
+}
+
+async function apiPropositions(req, res) {
+  const mins = await db.requete(
+    `SELECT pr.*, p.fournisseur, p.vpe, p.stock_depot, p.stock_depot2, p.stock_fdcm
        FROM propositions pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ORDER BY pr.maj_le DESC`
   );
-  json(res, 200, {
-    propositions: r.rows.map((x) => ({
+  const colls = await db.requete(
+    `SELECT pr.*, p.fournisseur
+       FROM propositions_collection pr LEFT JOIN produits p ON p.code_article = pr.code_article
+      ORDER BY pr.maj_le DESC`
+  );
+  const { parCode } = await ventesMoyennes();
+
+  const liste = [
+    ...mins.rows.map((x) => ({
+      type: 'min',
       codeArticle: x.code_article,
       ean: x.ean,
       description: x.description,
@@ -196,15 +331,34 @@ async function apiPropositions(req, res) {
       commentaire: x.commentaire,
       auteur: x.auteur,
       majLe: x.maj_le,
-      exportee: x.exporte_le != null,
+      statut: x.statut,
+      motifRefus: x.motif_refus,
+      alertes: x.statut === 'a_traiter' || x.statut === 'validee' ? calculerAlertes(x, parCode.get(x.code_article)) : [],
     })),
-  });
+    ...colls.rows.map((x) => ({
+      type: 'collection',
+      codeArticle: x.code_article,
+      ean: x.ean,
+      description: x.description,
+      fournisseur: x.fournisseur,
+      collectionActuelle: x.collection_actuelle,
+      collectionProposee: x.collection_proposee,
+      auteur: x.auteur,
+      majLe: x.maj_le,
+      statut: x.statut,
+      motifRefus: x.motif_refus,
+      alertes: [],
+    })),
+  ].sort((a, b) => new Date(b.majLe) - new Date(a.majLe));
+
+  json(res, 200, { propositions: liste });
 }
 
 async function apiSupprimerProposition(req, res, url) {
   const code = (url.searchParams.get('codeArticle') || '').trim();
+  const table = url.searchParams.get('type') === 'collection' ? 'propositions_collection' : 'propositions';
   if (!code) return json(res, 400, { erreur: 'codeArticle manquant.' });
-  await db.requete('DELETE FROM propositions WHERE code_article = $1', [code]);
+  await db.requete(`DELETE FROM ${table} WHERE code_article = $1`, [code]);
   json(res, 200, { ok: true });
 }
 
@@ -240,6 +394,19 @@ async function apiImportVentes(req, res, url) {
   });
 }
 
+async function apiImportCollections(req, res) {
+  const buffer = await lireCorps(req);
+  if (!buffer.length) return json(res, 400, { erreur: 'Fichier vide.' });
+  const { lignes, collections, avertissements } = await parserCollections(buffer);
+  await db.remplacerCollections(lignes, collections);
+  json(res, 200, { ok: true, nbArticles: lignes.length, nbCollections: collections.length, avertissements });
+}
+
+async function apiCollections(req, res) {
+  const r = await db.requete('SELECT nom FROM collections ORDER BY nom');
+  json(res, 200, { collections: r.rows.map((x) => x.nom) });
+}
+
 async function apiScansInconnus(req, res) {
   const r = await db.requete('SELECT * FROM scans_inconnus ORDER BY dernier_le DESC LIMIT 100');
   json(res, 200, {
@@ -255,30 +422,53 @@ async function apiScansVider(req, res) {
 async function apiEtat(req, res) {
   const prod = await db.requete('SELECT COUNT(*)::int AS nb, MAX(maj_le) AS maj FROM produits');
   const sem = await db.requete('SELECT debut, nb_lignes, importe_le FROM semaines_ventes ORDER BY debut DESC LIMIT 8');
-  const prop = await db.requete(
-    'SELECT COUNT(*)::int AS total, SUM(CASE WHEN exporte_le IS NULL THEN 1 ELSE 0 END)::int AS nouvelles FROM propositions'
-  );
+  const coll = await db.requete('SELECT COUNT(*)::int AS nb FROM collections_articles');
+  const compte = async (table) => (await db.requete(
+    `SELECT COUNT(*)::int AS total,
+            SUM(CASE WHEN statut = 'a_traiter' THEN 1 ELSE 0 END)::int AS a_traiter,
+            SUM(CASE WHEN statut = 'validee' THEN 1 ELSE 0 END)::int AS validees
+       FROM ${table}`
+  )).rows[0];
+  const pMin = await compte('propositions');
+  const pColl = await compte('propositions_collection');
   json(res, 200, {
     produits: { nb: prod.rows[0].nb, majLe: prod.rows[0].maj },
     semaines: sem.rows.map((s) => ({ debut: dateISO(s.debut), nbLignes: s.nb_lignes, importeLe: s.importe_le })),
-    propositions: prop.rows[0],
+    collections: { nbArticles: coll.rows[0].nb },
+    propositions: {
+      total: (pMin.total || 0) + (pColl.total || 0),
+      aTraiter: (pMin.a_traiter || 0) + (pColl.a_traiter || 0),
+      validees: (pMin.validees || 0) + (pColl.validees || 0),
+    },
   });
 }
 
+// Export Excel : seules les propositions VALIDÉES sortent (mode par défaut),
+// et passent alors « traitée ». mode=toutes re-télécharge validées + traitées.
 async function apiExport(req, res, url) {
-  const mode = url.searchParams.get('mode') === 'toutes' ? 'toutes' : 'nouvelles';
-  const filtre = mode === 'nouvelles' ? 'WHERE pr.exporte_le IS NULL' : '';
+  const type = url.searchParams.get('type') === 'collection' ? 'collection' : 'min';
+  const mode = url.searchParams.get('mode') === 'toutes' ? 'toutes' : 'validees';
+  const table = type === 'collection' ? 'propositions_collection' : 'propositions';
+  const filtre = mode === 'validees' ? "WHERE pr.statut = 'validee'" : "WHERE pr.statut IN ('validee', 'traitee')";
   const r = await db.requete(
     `SELECT pr.*, p.fournisseur, p.num_commande, p.vpe, p.stock_max
-       FROM propositions pr LEFT JOIN produits p ON p.code_article = pr.code_article
+       FROM ${table} pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ${filtre}
       ORDER BY pr.maj_le DESC`
   );
-  if (!r.rows.length) return json(res, 404, { erreur: 'Aucune proposition à exporter.' });
+  if (!r.rows.length) {
+    return json(res, 404, {
+      erreur: mode === 'validees'
+        ? 'Aucune proposition validée à exporter. Validez d’abord les propositions à traiter.'
+        : 'Aucune proposition validée ou traitée.',
+    });
+  }
 
-  const buffer = await genererExportPropositions(r.rows);
-  await db.requete('UPDATE propositions SET exporte_le = now() WHERE exporte_le IS NULL');
-  const nom = `adaptations-minimums-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  const buffer = type === 'collection'
+    ? await genererExportCollections(r.rows)
+    : await genererExportPropositions(r.rows);
+  await db.requete(`UPDATE ${table} SET statut = 'traitee', exporte_le = now() WHERE statut = 'validee'`);
+  const nom = `${type === 'collection' ? 'collections' : 'adaptations-minimums'}-${new Date().toISOString().slice(0, 10)}.xlsx`;
   res.writeHead(200, {
     'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'Content-Disposition': `attachment; filename="${nom}"`,
@@ -313,7 +503,9 @@ const serveur = http.createServer(async (req, res) => {
 
   try {
     if (url.pathname.startsWith('/api/')) {
-      const ADMIN_ROUTES = ['/api/propositions', '/api/proposition-suppr', '/api/import/minimums', '/api/import/ventes', '/api/etat', '/api/export', '/api/scans-inconnus', '/api/scans-inconnus-vider'];
+      const ADMIN_ROUTES = ['/api/propositions', '/api/proposition-suppr', '/api/proposition-decision',
+        '/api/import/minimums', '/api/import/ventes', '/api/import/collections',
+        '/api/etat', '/api/export', '/api/scans-inconnus', '/api/scans-inconnus-vider'];
       if (ADMIN_ROUTES.includes(url.pathname) && !estAdmin(req, url)) {
         return json(res, 401, { erreur: 'Code d’accès admin invalide.' });
       }
@@ -325,10 +517,14 @@ const serveur = http.createServer(async (req, res) => {
       }
       if (route === 'GET /api/produit') return await apiProduit(req, res, url);
       if (route === 'POST /api/proposition') return await apiProposer(req, res);
+      if (route === 'POST /api/proposition-collection') return await apiProposerCollection(req, res);
+      if (route === 'GET /api/collections') return await apiCollections(req, res);
       if (route === 'GET /api/propositions') return await apiPropositions(req, res);
       if (route === 'POST /api/proposition-suppr') return await apiSupprimerProposition(req, res, url);
+      if (route === 'POST /api/proposition-decision') return await apiDecision(req, res);
       if (route === 'POST /api/import/minimums') return await apiImportMinimums(req, res);
       if (route === 'POST /api/import/ventes') return await apiImportVentes(req, res, url);
+      if (route === 'POST /api/import/collections') return await apiImportCollections(req, res);
       if (route === 'GET /api/etat') return await apiEtat(req, res);
       if (route === 'GET /api/scans-inconnus') return await apiScansInconnus(req, res);
       if (route === 'POST /api/scans-inconnus-vider') return await apiScansVider(req, res);
