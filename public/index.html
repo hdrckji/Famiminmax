@@ -25,6 +25,8 @@
     position:sticky;top:0;z-index:10}
   header h1{font-size:19px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;margin:0}
   header .sous{font-size:12px;color:#cfe6a0;font-weight:500}
+  #chipUser{margin-left:auto;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer;
+    background:#1a4a2c;color:#cfe6a0;border:1.5px solid var(--lichtgroen);border-radius:99px;padding:5px 12px}
   main{max-width:560px;margin:0 auto;padding:12px 12px 90px}
 
   /* Zone scan */
@@ -133,6 +135,7 @@
 <header>
   <h1>Famiminmax</h1>
   <span class="sous">Minimums rayon</span>
+  <button type="button" id="chipUser" hidden>👤 —</button>
 </header>
 <main>
   <form class="scan" id="formScan" autocomplete="off">
@@ -224,6 +227,7 @@ async function chercher(code) {
     if (data.choix) { afficherChoix(data.choix); refocus(); return; }
     await chargerCollections();
     afficherFiche(data);
+    prolongerSession();
   } catch {
     zone.innerHTML = '<p class="msg err">Serveur injoignable. Vérifiez le réseau et réessayez.</p>';
   }
@@ -327,7 +331,7 @@ function afficherFiche(data) {
         '<button type="button" id="plus">+</button>' +
       '</div>' +
       '<textarea id="commentaire" maxlength="500" placeholder="Commentaire (facultatif)"></textarea>' +
-      '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (facultatif)" />' +
+      (listeCollegues.length ? '' : '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (facultatif)" />') +
       '<button class="btn-valider" id="valider">Envoyer la proposition</button>' +
       '</div>') +
     blocCollection;
@@ -344,15 +348,18 @@ function afficherFiche(data) {
     nouveauMin.value = (parseInt(nouveauMin.value, 10) || 0) + pas; refocus();
   });
 
-  const auteur = document.getElementById('auteur');
-  auteur.value = localStorage.getItem('famiminmax_auteur') || '';
+  const auteur = document.getElementById('auteur'); // absent quand l'identification est active
+  if (auteur) auteur.value = localStorage.getItem('famiminmax_auteur') || '';
 
   document.getElementById('valider').addEventListener('click', async () => {
     const btn = document.getElementById('valider');
     const min = parseInt(nouveauMin.value, 10);
     if (!Number.isInteger(min) || min < 0) { toast('Minimum invalide.', true); return; }
-    localStorage.setItem('famiminmax_auteur', auteur.value.trim());
     btn.disabled = true;
+    const nomSession = await identite();
+    if (nomSession === null) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
+    const nomAuteur = listeCollegues.length ? nomSession : (auteur ? auteur.value.trim() : '');
+    if (auteur) localStorage.setItem('famiminmax_auteur', auteur.value.trim());
     try {
       const rep = await fetch('/api/proposition', {
         method: 'POST',
@@ -361,12 +368,13 @@ function afficherFiche(data) {
           codeArticle: p.codeArticle,
           minPropose: min,
           commentaire: document.getElementById('commentaire').value,
-          auteur: auteur.value,
+          auteur: nomAuteur,
         }),
       });
       const data2 = await rep.json();
       if (!rep.ok) throw new Error(data2.erreur || 'Erreur serveur.');
       toast('✓ Proposition enregistrée : min ' + min);
+      prolongerSession();
       chercher(p.codeArticle);
     } catch (e) {
       toast(e.message, true);
@@ -376,24 +384,28 @@ function afficherFiche(data) {
   refocus();
 }
 
-// Sélecteur plein écran avec recherche (195 collections sur un écran 5", un
-// menu déroulant natif est inutilisable).
+// Sélecteur plein écran avec recherche — utilisé pour les collections (195
+// valeurs) et l'identification des collègues ; un menu natif est inutilisable
+// sur l'écran du TC26.
 function normaliser(s) {
   return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 }
-function ouvrirPickerCollections(onPick) {
+let pickerAnnule = null;
+function ouvrirPicker(items, placeholder, onPick, onCancel) {
   const voile = document.getElementById('voileColl');
   const liste = document.getElementById('listeCollUI');
   const rech = document.getElementById('rechColl');
+  pickerAnnule = onCancel || null;
   function rendre(filtre) {
     const f = normaliser(filtre || '');
-    const visibles = listeCollections.filter((c) => !f || normaliser(c).includes(f));
+    const visibles = items.filter((c) => !f || normaliser(c).includes(f));
     liste.innerHTML = visibles.length
       ? visibles.map((c) => '<button type="button" data-coll="' + ech(c) + '">' + ech(c) + '</button>').join('')
-      : '<p class="aucun">Aucune collection ne correspond à « ' + ech(filtre) + ' ».</p>';
+      : '<p class="aucun">Aucun résultat pour « ' + ech(filtre) + ' ».</p>';
     liste.querySelectorAll('button').forEach((b) =>
-      b.addEventListener('click', () => { voile.hidden = true; onPick(b.dataset.coll); }));
+      b.addEventListener('click', () => { voile.hidden = true; pickerAnnule = null; onPick(b.dataset.coll); }));
   }
+  rech.placeholder = placeholder;
   rech.value = '';
   rendre('');
   rech.oninput = () => rendre(rech.value);
@@ -402,8 +414,58 @@ function ouvrirPickerCollections(onPick) {
 }
 document.getElementById('fermerColl').addEventListener('click', () => {
   document.getElementById('voileColl').hidden = true;
+  const cb = pickerAnnule;
+  pickerAnnule = null;
+  if (cb) cb();
   refocus();
 });
+
+// --- Identification des collègues (session légère sur l'appareil) ---
+const SESSION_MS = 2 * 60 * 60 * 1000; // 2 h d'inactivité
+let listeCollegues = [];
+async function chargerCollegues() {
+  try {
+    const rep = await fetch('/api/collegues');
+    listeCollegues = (await rep.json()).collegues || [];
+  } catch {
+    listeCollegues = [];
+  }
+  majChip();
+}
+function utilisateurActuel() {
+  try {
+    const s = JSON.parse(localStorage.getItem('famiminmax_session') || 'null');
+    if (s && s.nom && s.expire > Date.now() && listeCollegues.includes(s.nom)) return s.nom;
+  } catch { /* session illisible = pas de session */ }
+  return null;
+}
+function ouvrirSession(nom) {
+  localStorage.setItem('famiminmax_session', JSON.stringify({ nom, expire: Date.now() + SESSION_MS }));
+  majChip();
+}
+function prolongerSession() {
+  const n = utilisateurActuel();
+  if (n) ouvrirSession(n);
+}
+function majChip() {
+  const chip = document.getElementById('chipUser');
+  chip.hidden = !listeCollegues.length;
+  chip.textContent = '👤 ' + (utilisateurActuel() || 'Identifiez-vous');
+}
+document.getElementById('chipUser').addEventListener('click', () => {
+  ouvrirPicker(listeCollegues, 'Votre nom…', (nom) => { ouvrirSession(nom); refocus(); });
+});
+// Nom requis pour proposer : session en cours, sinon le sélecteur s'ouvre.
+// Résout '' en mode libre (pas de liste), null si le collègue referme sans choisir.
+function identite() {
+  if (!listeCollegues.length) return Promise.resolve('');
+  const nom = utilisateurActuel();
+  if (nom) return Promise.resolve(nom);
+  return new Promise((resolve) => {
+    ouvrirPicker(listeCollegues, 'Votre nom…', (n) => { ouvrirSession(n); resolve(n); }, () => resolve(null));
+  });
+}
+chargerCollegues();
 
 // Branche le bloc de proposition de changement de collection (s'il est affiché).
 function brancherCollection(p) {
@@ -411,7 +473,7 @@ function brancherCollection(p) {
   const ouvrir = document.getElementById('ouvrirColl');
   if (!btn || !ouvrir) return;
   let choix = null;
-  ouvrir.addEventListener('click', () => ouvrirPickerCollections((c) => {
+  ouvrir.addEventListener('click', () => ouvrirPicker(listeCollections, 'Rechercher une collection…', (c) => {
     choix = c;
     ouvrir.textContent = c;
     ouvrir.classList.add('rempli');
@@ -419,10 +481,13 @@ function brancherCollection(p) {
   }));
   btn.addEventListener('click', async () => {
     if (!choix) { toast('Choisissez d’abord une collection.', true); return; }
-    const auteurEl = document.getElementById('auteur');
-    const auteur = (auteurEl ? auteurEl.value.trim() : '') || localStorage.getItem('famiminmax_auteur') || '';
-    if (auteur) localStorage.setItem('famiminmax_auteur', auteur);
     btn.disabled = true;
+    const nomSession = await identite();
+    if (nomSession === null) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
+    const auteurEl = document.getElementById('auteur');
+    const auteur = listeCollegues.length
+      ? nomSession
+      : ((auteurEl ? auteurEl.value.trim() : '') || localStorage.getItem('famiminmax_auteur') || '');
     try {
       const rep = await fetch('/api/proposition-collection', {
         method: 'POST',
@@ -432,6 +497,7 @@ function brancherCollection(p) {
       const data = await rep.json();
       if (!rep.ok) throw new Error(data.erreur || 'Erreur serveur.');
       toast('✓ Changement de collection proposé : ' + choix);
+      prolongerSession();
       chercher(p.codeArticle);
     } catch (e) {
       toast(e.message, true);

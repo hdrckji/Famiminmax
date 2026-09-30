@@ -148,6 +148,16 @@
       <div class="resultat" id="resColl"></div>
     </div>
 
+    <h2>Collègues (identification sur les Zebra)</h2>
+    <div class="carte">
+      <div class="det">Tant que la liste est vide, le nom reste facultatif sur les Zebra. Dès qu'elle contient des collègues, chacun doit <b>choisir son nom</b> avant de proposer (session de 2 h sur l'appareil) — la colonne Auteur devient fiable.</div>
+      <div class="ligne-form">
+        <input type="text" id="nomCollegue" placeholder="Prénom (et nom si doublon)" maxlength="60" style="font:inherit;font-size:13.5px;padding:8px;border-radius:9px;border:2px solid var(--bord)" />
+        <button class="btn" id="btnAjoutCollegue">Ajouter</button>
+      </div>
+      <div id="listeCollegues" style="margin-top:10px"></div>
+    </div>
+
     <h2>Scans non reconnus</h2>
     <div class="carte">
       <div class="det">Codes-barres scannés en magasin mais introuvables au référentiel — le plus souvent des articles à plusieurs codes-barres dont l'export ERP ne reprend que le principal. À vérifier dans l'ERP puis corriger (ou signaler).</div>
@@ -186,6 +196,7 @@ async function demarrer() {
     afficherEtat(await rep.json());
     chargerPropositions();
     chargerScansInconnus();
+    chargerCollegues();
   } catch {
     montrerPorte(false);
   }
@@ -405,6 +416,42 @@ document.getElementById('btnImportColl').addEventListener('click', async (e) => 
       (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
     demarrer();
   }
+});
+
+async function chargerCollegues() {
+  const rep = await fetch('/api/collegues');
+  const { collegues } = await rep.json();
+  const cible = document.getElementById('listeCollegues');
+  if (!collegues.length) {
+    cible.innerHTML = '<p class="vide">Aucun collègue — identification désactivée sur les Zebra.</p>';
+    return;
+  }
+  cible.innerHTML = collegues.map((n) =>
+    '<span class="badge traite" style="margin:2px 4px 2px 0;font-size:12.5px;padding:5px 6px 5px 12px">👤 ' + ech(n) +
+    ' <button class="btn danger" style="padding:1px 7px;margin-left:4px" data-collegue="' + ech(n) + '">✕</button></span>'
+  ).join('');
+  cible.querySelectorAll('button[data-collegue]').forEach((b) =>
+    b.addEventListener('click', async () => {
+      if (!confirm('Retirer ' + b.dataset.collegue + ' de la liste ?')) return;
+      await appel('/api/collegues-suppr?nom=' + encodeURIComponent(b.dataset.collegue), { method: 'POST' });
+      chargerCollegues();
+    }));
+}
+
+document.getElementById('btnAjoutCollegue').addEventListener('click', async () => {
+  const champ = document.getElementById('nomCollegue');
+  const nom = champ.value.trim();
+  if (!nom) return;
+  await appel('/api/collegues-ajout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nom }),
+  });
+  champ.value = '';
+  chargerCollegues();
+});
+document.getElementById('nomCollegue').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('btnAjoutCollegue').click();
 });
 
 async function chargerScansInconnus() {

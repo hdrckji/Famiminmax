@@ -314,3 +314,22 @@ test('proposition bloquée pour un article inactif sans stock dépôt', async ()
 test('décision sur une proposition inexistante : 404', async () => {
   assert.strictEqual((await decider('min', '00000', 'validee')).status, 404);
 });
+
+test('gestion des collègues (identification Zebra)', async () => {
+  // L'ajout exige le code admin ; la lecture est publique (les Zebra en ont besoin)
+  const sansCode = await api('/api/collegues-ajout', { method: 'POST', headers: JSON_H, body: JSON.stringify({ nom: 'Kim' }) });
+  assert.strictEqual(sansCode.status, 401);
+
+  for (const nom of ['Kim', 'Jimmy', 'Kim']) {
+    const rep = await api('/api/collegues-ajout', {
+      method: 'POST', headers: { ...ADMIN, ...JSON_H }, body: JSON.stringify({ nom }),
+    });
+    assert.strictEqual(rep.status, 200);
+  }
+  let { collegues } = await (await api('/api/collegues')).json();
+  assert.deepStrictEqual(collegues, ['Jimmy', 'Kim']); // dédupliqué, trié
+
+  await api('/api/collegues-suppr?nom=Kim', { method: 'POST', headers: ADMIN });
+  ({ collegues } = await (await api('/api/collegues')).json());
+  assert.deepStrictEqual(collegues, ['Jimmy']);
+});

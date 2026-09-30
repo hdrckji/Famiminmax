@@ -414,6 +414,32 @@ async function apiCollections(req, res) {
   json(res, 200, { collections: r.rows.map((x) => x.nom) });
 }
 
+// Liste des collègues pour l'identification sur les Zebra (gérée dans l'admin).
+async function apiCollegues(req, res) {
+  const r = await db.requete('SELECT nom FROM collegues ORDER BY nom');
+  json(res, 200, { collegues: r.rows.map((x) => x.nom) });
+}
+
+async function apiCollegueAjout(req, res) {
+  let corps;
+  try {
+    corps = JSON.parse((await lireCorps(req, 16 * 1024)).toString('utf8'));
+  } catch {
+    return json(res, 400, { erreur: 'Corps JSON invalide.' });
+  }
+  const nom = String(corps.nom || '').trim().slice(0, 60);
+  if (!nom) return json(res, 400, { erreur: 'Nom manquant.' });
+  await db.requete('INSERT INTO collegues (nom) VALUES ($1) ON CONFLICT (nom) DO NOTHING', [nom]);
+  json(res, 200, { ok: true });
+}
+
+async function apiCollegueSuppr(req, res, url) {
+  const nom = (url.searchParams.get('nom') || '').trim();
+  if (!nom) return json(res, 400, { erreur: 'Nom manquant.' });
+  await db.requete('DELETE FROM collegues WHERE nom = $1', [nom]);
+  json(res, 200, { ok: true });
+}
+
 async function apiScansInconnus(req, res) {
   const r = await db.requete('SELECT * FROM scans_inconnus ORDER BY dernier_le DESC LIMIT 100');
   json(res, 200, {
@@ -512,7 +538,8 @@ const serveur = http.createServer(async (req, res) => {
     if (url.pathname.startsWith('/api/')) {
       const ADMIN_ROUTES = ['/api/propositions', '/api/proposition-suppr', '/api/proposition-decision',
         '/api/import/minimums', '/api/import/ventes', '/api/import/collections',
-        '/api/etat', '/api/export', '/api/scans-inconnus', '/api/scans-inconnus-vider'];
+        '/api/etat', '/api/export', '/api/scans-inconnus', '/api/scans-inconnus-vider',
+        '/api/collegues-ajout', '/api/collegues-suppr'];
       if (ADMIN_ROUTES.includes(url.pathname) && !estAdmin(req, url)) {
         return json(res, 401, { erreur: 'Code d’accès admin invalide.' });
       }
@@ -526,6 +553,9 @@ const serveur = http.createServer(async (req, res) => {
       if (route === 'POST /api/proposition') return await apiProposer(req, res);
       if (route === 'POST /api/proposition-collection') return await apiProposerCollection(req, res);
       if (route === 'GET /api/collections') return await apiCollections(req, res);
+      if (route === 'GET /api/collegues') return await apiCollegues(req, res);
+      if (route === 'POST /api/collegues-ajout') return await apiCollegueAjout(req, res);
+      if (route === 'POST /api/collegues-suppr') return await apiCollegueSuppr(req, res, url);
       if (route === 'GET /api/propositions') return await apiPropositions(req, res);
       if (route === 'POST /api/proposition-suppr') return await apiSupprimerProposition(req, res, url);
       if (route === 'POST /api/proposition-decision') return await apiDecision(req, res);
