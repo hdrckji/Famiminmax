@@ -104,6 +104,23 @@
   .btn-valider:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--donkergroen)}
   .btn-valider:disabled{opacity:.55}
 
+  /* Sélecteur de collection plein écran (le datalist natif est inutilisable sur TC26) */
+  #voileColl{position:fixed;inset:0;z-index:40;background:rgba(18,50,31,.45);display:flex;align-items:flex-end}
+  #voileColl[hidden]{display:none}
+  .picker{background:#fff;border-radius:18px 18px 0 0;width:100%;max-height:86vh;display:flex;flex-direction:column;padding:12px}
+  .picker-tete{display:flex;gap:8px;margin-bottom:10px}
+  .picker-tete input{flex:1;font:inherit;font-size:16px;padding:11px 13px;border-radius:11px;border:2px solid var(--bord);min-width:0}
+  .picker-tete input:focus{outline:none;border-color:var(--lichtgroen)}
+  .picker-tete button{font-size:18px;padding:0 14px;border-radius:11px;border:2px solid var(--bord);background:#fff;color:var(--ink);cursor:pointer}
+  .picker-liste{overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .picker-liste button{display:block;width:100%;text-align:left;font:inherit;font-size:15px;padding:13px 14px;cursor:pointer;
+    border:none;border-bottom:1px solid #edf3e4;background:#fff;color:var(--ink)}
+  .picker-liste button:active{background:var(--lichtgroen-bg)}
+  .picker-liste .aucun{padding:14px;color:var(--ink-soft);font-size:14px}
+  .btn-choix{width:100%;font:inherit;font-size:15.5px;font-weight:600;padding:13px 14px;border-radius:12px;cursor:pointer;
+    background:#fff;color:var(--ink);border:2px dashed var(--bord);margin-bottom:10px;text-align:left}
+  .btn-choix.rempli{border-style:solid;border-color:var(--lichtgroen);background:var(--lichtgroen-bg)}
+
   /* Toast */
   #toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%) translateY(90px);z-index:50;
     background:var(--donkergroen);color:#fff;font-weight:600;font-size:15px;padding:13px 22px;border-radius:14px;
@@ -127,6 +144,15 @@
     <p class="msg info">Scannez l'étiquette d'un produit pour afficher son minimum rayon et ses ventes des 5 dernières semaines.</p>
   </div>
 </main>
+<div id="voileColl" hidden>
+  <div class="picker">
+    <div class="picker-tete">
+      <input id="rechColl" placeholder="Rechercher une collection…" autocomplete="off" />
+      <button type="button" id="fermerColl">✕</button>
+    </div>
+    <div class="picker-liste" id="listeCollUI"></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script>
@@ -262,9 +288,8 @@ function afficherFiche(data) {
       '<p class="collec-actuelle">Collection actuelle : <b>' + (data.collection ? ech(data.collection) : '—') + '</b></p>' +
       enCoursColl +
       (listeCollections.length
-        ? '<input class="auteur" id="collChoix" list="listeColl" placeholder="Nouvelle collection (tapez pour chercher)…" />' +
-          '<datalist id="listeColl">' + listeCollections.map((c) => '<option value="' + ech(c) + '"></option>').join('') + '</datalist>' +
-          '<button class="btn-valider" id="validerColl">Proposer le changement de collection</button>'
+        ? '<button type="button" class="btn-choix" id="ouvrirColl">Choisir la nouvelle collection…</button>' +
+          '<button class="btn-valider" id="validerColl" disabled>Proposer le changement de collection</button>'
         : '<p class="aide">Liste des collections indisponible — importez le fichier collections dans l\'admin.</p>') +
       '</div>'
     : '';
@@ -352,14 +377,49 @@ function afficherFiche(data) {
   refocus();
 }
 
-// Branche le bouton de proposition de changement de collection (s'il est affiché).
+// Sélecteur plein écran avec recherche (195 collections sur un écran 5", un
+// menu déroulant natif est inutilisable).
+function normaliser(s) {
+  return String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+function ouvrirPickerCollections(onPick) {
+  const voile = document.getElementById('voileColl');
+  const liste = document.getElementById('listeCollUI');
+  const rech = document.getElementById('rechColl');
+  function rendre(filtre) {
+    const f = normaliser(filtre || '');
+    const visibles = listeCollections.filter((c) => !f || normaliser(c).includes(f));
+    liste.innerHTML = visibles.length
+      ? visibles.map((c) => '<button type="button" data-coll="' + ech(c) + '">' + ech(c) + '</button>').join('')
+      : '<p class="aucun">Aucune collection ne correspond à « ' + ech(filtre) + ' ».</p>';
+    liste.querySelectorAll('button').forEach((b) =>
+      b.addEventListener('click', () => { voile.hidden = true; onPick(b.dataset.coll); }));
+  }
+  rech.value = '';
+  rendre('');
+  rech.oninput = () => rendre(rech.value);
+  voile.hidden = false;
+  setTimeout(() => rech.focus(), 60);
+}
+document.getElementById('fermerColl').addEventListener('click', () => {
+  document.getElementById('voileColl').hidden = true;
+  refocus();
+});
+
+// Branche le bloc de proposition de changement de collection (s'il est affiché).
 function brancherCollection(p) {
   const btn = document.getElementById('validerColl');
-  if (!btn) return;
+  const ouvrir = document.getElementById('ouvrirColl');
+  if (!btn || !ouvrir) return;
+  let choix = null;
+  ouvrir.addEventListener('click', () => ouvrirPickerCollections((c) => {
+    choix = c;
+    ouvrir.textContent = c;
+    ouvrir.classList.add('rempli');
+    btn.disabled = false;
+  }));
   btn.addEventListener('click', async () => {
-    const choix = document.getElementById('collChoix').value.trim();
-    if (!choix) { toast('Choisissez une collection dans la liste.', true); return; }
-    if (!listeCollections.includes(choix)) { toast('Collection inconnue : choisissez-la dans la liste.', true); return; }
+    if (!choix) { toast('Choisissez d’abord une collection.', true); return; }
     const auteurEl = document.getElementById('auteur');
     const auteur = (auteurEl ? auteurEl.value.trim() : '') || localStorage.getItem('famiminmax_auteur') || '';
     if (auteur) localStorage.setItem('famiminmax_auteur', auteur);
