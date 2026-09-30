@@ -160,6 +160,8 @@ test('proposition min : circuit complet avec alertes', async () => {
 
   let { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
   assert.strictEqual(propositions.length, 1);
+  assert.strictEqual(propositions[0].ventesMoy, 24); // (18 + 30) / 2 semaines
+  assert.strictEqual(propositions[0].stockDepots, 4575); // 687 + 0 + 3888
   assert.deepStrictEqual(propositions[0].alertes.map((a) => a.code).sort(),
     ['depot', 'variation', 'ventes', 'vpe']);
 

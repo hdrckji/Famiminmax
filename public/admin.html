@@ -53,8 +53,9 @@
   .badge.traite{background:#e4e9df;color:var(--ink-soft)}
   .badge.refus{background:var(--rouge-bg);color:#9c3547;border:1px solid var(--rouge)}
   .badge.type{background:var(--donkergroen);color:#fff;letter-spacing:.03em}
-  .alerte-badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;margin:1px 2px 1px 0;
-    background:var(--rouge-bg);color:#9c3547;border:1px solid var(--rouge);cursor:help;white-space:nowrap}
+  tr.ligne-alerte td{background:#ffe9e8 !important}
+  .alerte-cell{color:#c1465a;font-weight:800;cursor:help}
+  .chiffre{white-space:nowrap;font-weight:600}
   .actions button{margin-right:4px}
   details{margin-top:14px}
   details summary{cursor:pointer;font-weight:600;color:var(--ink-soft);font-size:14px;margin-bottom:8px}
@@ -97,15 +98,22 @@
   </div>
 
   <div id="vueProp">
-    <h2>Propositions d'adaptation</h2>
-    <div class="det" style="margin-bottom:10px">Les propositions sont <b>validées automatiquement</b>. Refusez celles qui posent problème (motif obligatoire, visible sur le Zebra du collègue) — les alertes ⚠ vous aident à les repérer. L'export sort toutes les validées et les passe « traitées ».</div>
+    <div class="det" style="margin:14px 0 4px">Les propositions sont <b>validées automatiquement</b>. Refusez celles qui posent problème (motif obligatoire, visible sur le Zebra du collègue) — les lignes en rouge signalent une incohérence probable. L'export sort toutes les validées et les passe « traitées ».</div>
+
+    <h2>Minimums rayon</h2>
     <div class="ligne-form" style="margin-bottom:10px">
-      <button class="btn" id="btnExportMin">⬇ Minimums validés (format ERP)</button>
-      <button class="btn" id="btnExportColl">⬇ Collections validées</button>
-      <button class="btn secondaire" id="btnExportMinToutes">Ré-exporter l'historique min</button>
-      <span class="det" id="resExport"></span>
+      <button class="btn" id="btnExportMin">⬇ Exporter les validés (format ERP)</button>
+      <button class="btn secondaire" id="btnExportMinToutes">Ré-exporter l'historique</button>
+      <span class="det" id="resExportMin"></span>
     </div>
-    <div id="tableProp"></div>
+    <div id="tablePropMin"></div>
+
+    <h2>Collections</h2>
+    <div class="ligne-form" style="margin-bottom:10px">
+      <button class="btn" id="btnExportColl">⬇ Exporter les validées</button>
+      <span class="det" id="resExportColl"></span>
+    </div>
+    <div id="tablePropColl"></div>
   </div>
 
   <div id="vueImports" hidden>
@@ -289,7 +297,6 @@ document.getElementById('btnImportVentes').addEventListener('click', async (e) =
   }
 });
 
-const LIB_ALERTES = { ventes: '⚠ ventes', depot: '⚠ dépôt', variation: '⚠ écart', vpe: '⚠ VPE' };
 const LIB_STATUTS = {
   a_traiter: ['attente', 'à traiter'],
   validee: ['valid', 'validée'],
@@ -303,54 +310,71 @@ function celluleDemande(p) {
     : ech(p.collectionActuelle || '—') + ' → <b>' + ech(p.collectionProposee) + '</b>';
 }
 
-function ligneProposition(p, actions) {
-  const [cls, lib] = LIB_STATUTS[p.statut] || LIB_STATUTS.a_traiter;
-  const alertes = (p.alertes || []).map((a) =>
-    '<span class="alerte-badge" title="' + ech(a.detail) + '">' + (LIB_ALERTES[a.code] || a.code) + '</span>').join('');
-  return '<tr>' +
-    '<td><span class="badge type">' + (p.type === 'min' ? 'MIN' : 'COLL') + '</span></td>' +
+function ligneProposition(p, actions, avecChiffres) {
+  const [cls, lib] = LIB_STATUTS[p.statut] || LIB_STATUTS.validee;
+  // Chaque alerte s'accroche à sa colonne : ⚠ à côté du chiffre concerné (survol = détail)
+  const a = {};
+  (p.alertes || []).forEach((x) => { a[x.code] = x.detail; });
+  const puce = (detail) => detail ? ' <span class="alerte-cell" title="' + ech(detail) + '">⚠</span>' : '';
+  const demandeAlerte = [a.variation, a.vpe].filter(Boolean).join(' · ');
+  const chiffres = avecChiffres
+    ? '<td class="chiffre">' + (p.ventesMoy != null ? p.ventesMoy : '—') + puce(a.ventes) + '</td>' +
+      '<td class="chiffre">' + (p.stockDepots != null ? p.stockDepots : '—') + puce(a.depot) + '</td>'
+    : '';
+  return '<tr' + ((p.alertes || []).length ? ' class="ligne-alerte"' : '') + '>' +
     '<td>' + ech(p.codeArticle) + '</td>' +
-    '<td>' + ech(p.description) + (p.fournisseur ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">' + ech(p.fournisseur) + '</span>' : '') + '</td>' +
-    '<td>' + celluleDemande(p) + '</td>' +
-    '<td>' + (alertes || '—') + (p.commentaire ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">💬 ' + ech(p.commentaire) + '</span>' : '') +
+    '<td>' + ech(p.description) + (p.fournisseur ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">' + ech(p.fournisseur) + '</span>' : '') +
+      (p.commentaire ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">💬 ' + ech(p.commentaire) + '</span>' : '') +
       (p.motifRefus ? '<br><span class="motif">Refus : ' + ech(p.motifRefus) + '</span>' : '') + '</td>' +
+    '<td>' + celluleDemande(p) + puce(demandeAlerte) + '</td>' +
+    chiffres +
     '<td>' + ech(p.auteur || '—') + '</td>' +
     '<td>' + fdatetime(p.majLe) + '</td>' +
     '<td><span class="badge ' + cls + '">' + lib + '</span></td>' +
     '<td class="actions">' + actions + '</td></tr>';
 }
 
-async function chargerPropositions() {
-  const rep = await appel('/api/propositions');
-  const { propositions } = await rep.json();
-  const cible = document.getElementById('tableProp');
-  const actives = propositions.filter((p) => p.statut === 'a_traiter' || p.statut === 'validee');
-  const historique = propositions.filter((p) => p.statut === 'refusee' || p.statut === 'traitee');
+// Rend une section (minimums ou collections) : tableau actif + historique repliable.
+function rendreSection(liste, cibleId, avecChiffres, videTexte) {
+  const cible = document.getElementById(cibleId);
+  const actives = liste.filter((p) => p.statut === 'a_traiter' || p.statut === 'validee');
+  const historique = liste.filter((p) => p.statut === 'refusee' || p.statut === 'traitee');
 
-  const ENTETE = '<table><thead><tr><th>Type</th><th>Article</th><th>Description</th><th>Demande</th><th>Alertes / infos</th><th>Auteur</th><th>Quand</th><th>Statut</th><th></th></tr></thead><tbody>';
+  const entete = '<table><thead><tr><th>Article</th><th>Description</th><th>Demande</th>' +
+    (avecChiffres ? '<th>Ventes moy./sem</th><th>Stock dépôts</th>' : '') +
+    '<th>Auteur</th><th>Quand</th><th>Statut</th><th></th></tr></thead><tbody>';
 
   let html = '';
   if (!actives.length) {
-    html += '<p class="vide">Aucune proposition en attente d\'export — tout est traité ou refusé. 👌</p>';
+    html += '<p class="vide">' + videTexte + '</p>';
   } else {
-    html += ENTETE + actives.map((p) => {
+    html += entete + actives.map((p) => {
       const cle = `data-type="${p.type}" data-code="${ech(p.codeArticle)}"`;
-      return ligneProposition(p, `<button class="btn danger" data-decision="refusee" ${cle}>✗ Refuser</button>`);
+      return ligneProposition(p, `<button class="btn danger" data-decision="refusee" ${cle}>✗ Refuser</button>`, avecChiffres);
     }).join('') + '</tbody></table>';
   }
   if (historique.length) {
     html += '<details><summary>Historique — ' + historique.length + ' proposition(s) traitée(s) ou refusée(s)</summary>' +
-      ENTETE + historique.map((p) => {
+      entete + historique.map((p) => {
         const cle = `data-type="${p.type}" data-code="${ech(p.codeArticle)}"`;
         const actions = (p.statut === 'refusee'
           ? `<button class="btn danger" data-decision="validee" ${cle}>↩ Revalider</button>` : '') +
           `<button class="btn danger" data-suppr ${cle}>✕</button>`;
-        return ligneProposition(p, actions);
+        return ligneProposition(p, actions, avecChiffres);
       }).join('') + '</tbody></table></details>';
   }
   cible.innerHTML = html;
+}
 
-  cible.querySelectorAll('button[data-decision]').forEach((b) =>
+async function chargerPropositions() {
+  const rep = await appel('/api/propositions');
+  const { propositions } = await rep.json();
+  rendreSection(propositions.filter((p) => p.type === 'min'), 'tablePropMin', true,
+    'Aucune demande de minimum en attente d\'export. 👌');
+  rendreSection(propositions.filter((p) => p.type === 'collection'), 'tablePropColl', false,
+    'Aucune demande de changement de collection en attente. 👌');
+
+  document.querySelectorAll('#vueProp button[data-decision]').forEach((b) =>
     b.addEventListener('click', async () => {
       let motif = '';
       if (b.dataset.decision === 'refusee') {
@@ -365,7 +389,7 @@ async function chargerPropositions() {
       if (!rep.ok) alert((await rep.json()).erreur || 'Erreur serveur.');
       demarrer();
     }));
-  cible.querySelectorAll('button[data-suppr]').forEach((b) =>
+  document.querySelectorAll('#vueProp button[data-suppr]').forEach((b) =>
     b.addEventListener('click', async () => {
       if (!confirm('Supprimer définitivement la proposition pour l’article ' + b.dataset.code + ' ?')) return;
       await appel('/api/proposition-suppr?type=' + b.dataset.type + '&codeArticle=' + encodeURIComponent(b.dataset.code), { method: 'POST' });
@@ -407,7 +431,7 @@ document.getElementById('btnViderScans').addEventListener('click', async () => {
 });
 
 async function exporter(type, mode) {
-  const info = document.getElementById('resExport');
+  const info = document.getElementById(type === 'collection' ? 'resExportColl' : 'resExportMin');
   info.textContent = 'Génération…';
   try {
     const rep = await appel('/api/export?type=' + type + '&mode=' + mode);

@@ -314,11 +314,13 @@ async function apiPropositions(req, res) {
       ORDER BY pr.maj_le DESC`
   );
   const colls = await db.requete(
-    `SELECT pr.*, p.fournisseur
+    `SELECT pr.*, p.fournisseur, p.stock_depot, p.stock_depot2, p.stock_fdcm
        FROM propositions_collection pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ORDER BY pr.maj_le DESC`
   );
   const { parCode } = await ventesMoyennes();
+  const arrondi = (v) => Math.round(v * 10) / 10;
+  const depots = (x) => (x.stock_depot || 0) + (x.stock_depot2 || 0) + (x.stock_fdcm || 0);
 
   const liste = [
     ...mins.rows.map((x) => ({
@@ -334,6 +336,8 @@ async function apiPropositions(req, res) {
       majLe: x.maj_le,
       statut: x.statut,
       motifRefus: x.motif_refus,
+      ventesMoy: arrondi(parCode.get(x.code_article) || 0),
+      stockDepots: depots(x),
       alertes: x.statut === 'a_traiter' || x.statut === 'validee' ? calculerAlertes(x, parCode.get(x.code_article)) : [],
     })),
     ...colls.rows.map((x) => ({
@@ -348,6 +352,8 @@ async function apiPropositions(req, res) {
       majLe: x.maj_le,
       statut: x.statut,
       motifRefus: x.motif_refus,
+      ventesMoy: arrondi(parCode.get(x.code_article) || 0),
+      stockDepots: depots(x),
       alertes: [],
     })),
   ].sort((a, b) => new Date(b.majLe) - new Date(a.majLe));
