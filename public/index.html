@@ -106,6 +106,15 @@
   .btn-valider:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--donkergroen)}
   .btn-valider:disabled{opacity:.55}
 
+  /* Identification : page nom au premier accès, session 30 min glissantes */
+  #voileNom{position:fixed;inset:0;z-index:45;background:rgba(18,50,31,.55);display:flex;align-items:center;justify-content:center;padding:18px}
+  #voileNom[hidden]{display:none}
+  .carte-nom{background:#fff;border-radius:18px;padding:20px;width:100%;max-width:380px}
+  .carte-nom h3{margin:0 0 6px;font-size:18px;font-weight:700}
+  .carte-nom p{margin:0 0 12px;font-size:12.5px;color:var(--ink-soft)}
+  .carte-nom input{width:100%;font:inherit;font-size:17px;padding:12px;border-radius:11px;border:2px solid var(--bord);margin-bottom:12px}
+  .carte-nom input:focus{outline:none;border-color:var(--lichtgroen)}
+
   /* Sélecteur de collection plein écran (le datalist natif est inutilisable sur TC26) */
   #voileColl{position:fixed;inset:0;z-index:40;background:rgba(18,50,31,.45);display:flex;align-items:flex-end}
   #voileColl[hidden]{display:none}
@@ -147,6 +156,14 @@
     <p class="msg info">Scannez l'étiquette d'un produit pour afficher son minimum rayon et ses ventes des 5 dernières semaines.</p>
   </div>
 </main>
+<div id="voileNom" hidden>
+  <div class="carte-nom">
+    <h3>👤 Qui êtes-vous ?</h3>
+    <p>Votre nom signera vos propositions. Il reste actif 30 minutes après votre dernière action sur cet appareil.</p>
+    <input id="champNom" maxlength="80" placeholder="Votre nom" autocomplete="off" />
+    <button class="btn-valider" id="validerNom">C'est parti</button>
+  </div>
+</div>
 <div id="voileColl" hidden>
   <div class="picker">
     <div class="picker-tete">
@@ -296,7 +313,6 @@ function afficherFiche(data) {
       enCoursColl +
       (listeCollections.length
         ? '<button type="button" class="btn-choix" id="ouvrirColl">Choisir la nouvelle collection…</button>' +
-          (listeCollegues.length ? '' : '<input class="auteur" id="auteurColl" maxlength="80" placeholder="Votre nom (obligatoire)" required />') +
           '<button class="btn-valider" id="validerColl" disabled>Proposer le changement de collection</button>'
         : '<p class="aide">Liste des collections indisponible — importez le fichier collections dans l\'admin.</p>') +
       '</div>'
@@ -337,7 +353,6 @@ function afficherFiche(data) {
         '<button type="button" id="plus">+</button>' +
       '</div>' +
       '<textarea id="commentaire" maxlength="500" placeholder="Commentaire (facultatif)"></textarea>' +
-      (listeCollegues.length ? '' : '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (obligatoire)" required />') +
       '<button class="btn-valider" id="valider">Envoyer la proposition</button>' +
       '</div>') +
     blocCollection;
@@ -354,24 +369,13 @@ function afficherFiche(data) {
     nouveauMin.value = (parseInt(nouveauMin.value, 10) || 0) + pas; refocus();
   });
 
-  const auteur = document.getElementById('auteur'); // absent quand l'identification est active
-  if (auteur) auteur.value = localStorage.getItem('famiminmax_auteur') || '';
-
   document.getElementById('valider').addEventListener('click', async () => {
     const btn = document.getElementById('valider');
     const min = parseInt(nouveauMin.value, 10);
     if (!Number.isInteger(min) || min < 0) { toast('Minimum invalide.', true); return; }
-    const nomLibre = auteur ? auteur.value.trim() : '';
-    if (!listeCollegues.length && !nomLibre) {
-      toast('Indiquez votre nom pour envoyer la proposition.', true);
-      if (auteur) auteur.focus();
-      return;
-    }
     btn.disabled = true;
-    const nomSession = await identite();
-    if (nomSession === null) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
-    const nomAuteur = listeCollegues.length ? nomSession : nomLibre;
-    if (nomLibre) localStorage.setItem('famiminmax_auteur', nomLibre);
+    const nom = await identite();
+    if (!nom) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
     try {
       const rep = await fetch('/api/proposition', {
         method: 'POST',
@@ -380,7 +384,7 @@ function afficherFiche(data) {
           codeArticle: p.codeArticle,
           minPropose: min,
           commentaire: document.getElementById('commentaire').value,
-          auteur: nomAuteur,
+          auteur: nom,
         }),
       });
       const data2 = await rep.json();
@@ -432,8 +436,11 @@ document.getElementById('fermerColl').addEventListener('click', () => {
   refocus();
 });
 
-// --- Identification des collègues (session légère sur l'appareil) ---
-const SESSION_MS = 2 * 60 * 60 * 1000; // 2 h d'inactivité
+// --- Identification (session légère sur l'appareil) ---
+// Page nom au premier accès, puis le nom reste actif SESSION_MS après la
+// dernière action (scan ou proposition). Si une liste de collègues est
+// configurée dans l'admin, elle remplace la saisie libre par le sélecteur.
+const SESSION_MS = 30 * 60 * 1000; // 30 min glissantes
 let listeCollegues = [];
 async function chargerCollegues() {
   try {
@@ -443,11 +450,13 @@ async function chargerCollegues() {
     listeCollegues = [];
   }
   majChip();
+  if (!utilisateurActuel()) identite(); // première page : on s'identifie avant le reste
 }
 function utilisateurActuel() {
   try {
     const s = JSON.parse(localStorage.getItem('famiminmax_session') || 'null');
-    if (s && s.nom && s.expire > Date.now() && listeCollegues.includes(s.nom)) return s.nom;
+    if (s && s.nom && s.expire > Date.now() &&
+        (!listeCollegues.length || listeCollegues.includes(s.nom))) return s.nom;
   } catch { /* session illisible = pas de session */ }
   return null;
 }
@@ -461,21 +470,55 @@ function prolongerSession() {
 }
 function majChip() {
   const chip = document.getElementById('chipUser');
-  chip.hidden = !listeCollegues.length;
+  chip.hidden = false;
   chip.textContent = '👤 ' + (utilisateurActuel() || 'Identifiez-vous');
 }
-document.getElementById('chipUser').addEventListener('click', () => {
-  ouvrirPicker(listeCollegues, 'Votre nom…', (nom) => { ouvrirSession(nom); refocus(); });
+
+// Saisie libre du nom (dernier nom de l'appareil pré-rempli : un toucher suffit)
+let resolveNom = null;
+function demanderNom() {
+  return new Promise((resolve) => {
+    resolveNom = resolve;
+    const champ = document.getElementById('champNom');
+    champ.value = localStorage.getItem('famiminmax_auteur') || '';
+    document.getElementById('voileNom').hidden = false;
+    setTimeout(() => { champ.focus(); champ.select(); }, 60);
+  });
+}
+document.getElementById('validerNom').addEventListener('click', () => {
+  const nom = document.getElementById('champNom').value.trim();
+  if (!nom) { toast('Indiquez votre nom.', true); return; }
+  localStorage.setItem('famiminmax_auteur', nom);
+  ouvrirSession(nom);
+  document.getElementById('voileNom').hidden = true;
+  const r = resolveNom;
+  resolveNom = null;
+  if (r) r(nom);
+  refocus();
 });
-// Nom requis pour proposer : session en cours, sinon le sélecteur s'ouvre.
-// Résout '' en mode libre (pas de liste), null si le collègue referme sans choisir.
+document.getElementById('champNom').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('validerNom').click();
+});
+
+document.getElementById('chipUser').addEventListener('click', () => {
+  if (listeCollegues.length) {
+    ouvrirPicker(listeCollegues, 'Votre nom…', (nom) => { ouvrirSession(nom); refocus(); });
+  } else {
+    demanderNom();
+  }
+});
+
+// Nom requis : session en cours, sinon page nom (libre) ou sélecteur (liste).
+// Résout le nom, ou null si le collègue referme le sélecteur sans choisir.
 function identite() {
-  if (!listeCollegues.length) return Promise.resolve('');
   const nom = utilisateurActuel();
   if (nom) return Promise.resolve(nom);
-  return new Promise((resolve) => {
-    ouvrirPicker(listeCollegues, 'Votre nom…', (n) => { ouvrirSession(n); resolve(n); }, () => resolve(null));
-  });
+  if (listeCollegues.length) {
+    return new Promise((resolve) => {
+      ouvrirPicker(listeCollegues, 'Votre nom…', (n) => { ouvrirSession(n); resolve(n); }, () => resolve(null));
+    });
+  }
+  return demanderNom();
 }
 chargerCollegues();
 
@@ -491,26 +534,16 @@ function brancherCollection(p) {
     ouvrir.classList.add('rempli');
     btn.disabled = false;
   }));
-  const auteurColl = document.getElementById('auteurColl');
-  if (auteurColl) auteurColl.value = localStorage.getItem('famiminmax_auteur') || '';
   btn.addEventListener('click', async () => {
     if (!choix) { toast('Choisissez d’abord une collection.', true); return; }
-    const nomLibre = auteurColl ? auteurColl.value.trim() : '';
-    if (!listeCollegues.length && !nomLibre) {
-      toast('Indiquez votre nom pour envoyer la proposition.', true);
-      if (auteurColl) auteurColl.focus();
-      return;
-    }
     btn.disabled = true;
-    const nomSession = await identite();
-    if (nomSession === null) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
-    const auteur = listeCollegues.length ? nomSession : nomLibre;
-    if (nomLibre) localStorage.setItem('famiminmax_auteur', nomLibre);
+    const nom = await identite();
+    if (!nom) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
     try {
       const rep = await fetch('/api/proposition-collection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ codeArticle: p.codeArticle, collectionProposee: choix, auteur }),
+        body: JSON.stringify({ codeArticle: p.codeArticle, collectionProposee: choix, auteur: nom }),
       });
       const data = await rep.json();
       if (!rep.ok) throw new Error(data.erreur || 'Erreur serveur.');
