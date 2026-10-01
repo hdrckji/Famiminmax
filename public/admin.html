@@ -54,6 +54,7 @@
   .badge.refus{background:var(--rouge-bg);color:#9c3547;border:1px solid var(--rouge)}
   .badge.type{background:var(--donkergroen);color:#fff;letter-spacing:.03em}
   tr.ligne-alerte td{background:#ffe9e8 !important}
+  .vignette{width:46px;height:46px;object-fit:cover;border-radius:8px;border:1.5px solid var(--bord);display:block;background:#f4f7ef}
   .alerte-cell{color:#c1465a;font-weight:800;cursor:help}
   .chiffre{white-space:nowrap;font-weight:600}
   .actions button{margin-right:4px}
@@ -151,6 +152,16 @@
         <button class="btn" id="btnImportColl">Importer</button>
       </div>
       <div class="resultat" id="resColl"></div>
+    </div>
+
+    <h2>4 · Importer les photos des articles</h2>
+    <div class="carte">
+      <div class="det">Excel avec le <b>numéro d'article</b> et le <b>lien web de la photo</b> (colonnes repérées par intitulé). Fusion : les photos s'ajoutent ou se mettent à jour, un fichier par famille n'efface pas les autres. Les vignettes apparaissent dans les tableaux de propositions.</div>
+      <div class="ligne-form">
+        <input type="file" id="fichierPhotos" accept=".xlsx" />
+        <button class="btn" id="btnImportPhotos">Importer</button>
+      </div>
+      <div class="resultat" id="resPhotos"></div>
     </div>
 
     <h2>Collègues (identification sur les Zebra)</h2>
@@ -398,7 +409,11 @@ function ligneProposition(p, actions, avecChiffres) {
     ? '<td class="chiffre">' + (p.ventesMoy != null ? p.ventesMoy : '—') + puce(a.ventes) + '</td>' +
       '<td class="chiffre">' + (p.stockDepots != null ? p.stockDepots : '—') + puce(a.depot) + '</td>'
     : '';
+  const vignette = p.photo
+    ? '<a href="' + ech(p.photo) + '" target="_blank" rel="noopener"><img class="vignette" loading="lazy" src="' + ech(p.photo) + '" onerror="this.parentNode.style.display=\'none\'" /></a>'
+    : '';
   return '<tr' + ((p.alertes || []).length ? ' class="ligne-alerte"' : '') + '>' +
+    '<td>' + vignette + '</td>' +
     '<td>' + ech(p.codeArticle) + '</td>' +
     '<td>' + ech(p.description) +
       ((p.famille || p.fournisseur) ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">' +
@@ -419,7 +434,7 @@ function rendreSection(liste, cibleId, avecChiffres, videTexte) {
   const actives = liste.filter((p) => p.statut === 'a_traiter' || p.statut === 'validee');
   const historique = liste.filter((p) => p.statut === 'refusee' || p.statut === 'traitee');
 
-  const entete = '<table><thead><tr><th>Article</th><th>Description</th><th>Demande</th>' +
+  const entete = '<table><thead><tr><th></th><th>Article</th><th>Description</th><th>Demande</th>' +
     (avecChiffres ? '<th>Ventes moy./sem</th><th>Stock dépôts</th>' : '') +
     '<th>Auteur</th><th>Quand</th><th>Statut</th><th></th></tr></thead><tbody>';
 
@@ -475,6 +490,15 @@ async function chargerPropositions() {
       demarrer();
     }));
 }
+
+document.getElementById('btnImportPhotos').addEventListener('click', async (e) => {
+  const data = await importer('fichierPhotos', '/api/import/photos', 'resPhotos', e.target);
+  if (data) {
+    afficherResultat('resPhotos', true, '✓ ' + data.nbPhotos.toLocaleString('fr-BE') + ' photo(s) ajoutée(s) ou mise(s) à jour.' +
+      (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
+    chargerPropositions();
+  }
+});
 
 document.getElementById('btnImportColl').addEventListener('click', async (e) => {
   const fam = lireFamilleChamp('familleColl', 'resColl');

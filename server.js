@@ -6,7 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const db = require('./lib/db');
-const { parserMinimums, parserVentes, parserCollections, candidatsScan } = require('./lib/parseurs');
+const { parserMinimums, parserVentes, parserCollections, parserPhotos, candidatsScan } = require('./lib/parseurs');
 const { genererExportPropositions, genererExportCollections } = require('./lib/export');
 
 const PORT = process.env.PORT || 3000;
@@ -79,11 +79,13 @@ async function apiProduit(req, res, url) {
   const brut = (url.searchParams.get('code') || '').trim();
   if (!brut) return json(res, 400, { erreur: 'Paramètre "code" manquant.' });
 
+  // Le même champ accepte l'EAN du produit ou le numéro d'article de l'étiquette
+  // rayon (variantes avec/sans zéros de tête comprises).
   const candidats = candidatsScan(brut);
   const placeholders = candidats.map((_, i) => `$${i + 1}`).join(',');
   const r = await db.requete(
-    `SELECT * FROM produits WHERE ean IN (${placeholders}) OR code_article = $${candidats.length + 1} LIMIT 6`,
-    [...candidats, brut]
+    `SELECT * FROM produits WHERE ean IN (${placeholders}) OR code_article IN (${placeholders}) LIMIT 6`,
+    candidats
   );
   if (!r.rows.length) {
     // Journal des codes scannés introuvables : visible dans l'admin pour
@@ -193,7 +195,8 @@ async function apiProposer(req, res) {
   }
 
   const commentaire = String(corps.commentaire || '').trim().slice(0, 500) || null;
-  const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
+  const auteur = String(corps.auteur || '').trim().slice(0, 80);
+  if (!auteur) return json(res, 400, { erreur: 'Indiquez votre nom pour envoyer la proposition.' });
 
   // Une seule proposition par produit : la dernière écrase la précédente.
   // Validée d'office — l'acheteur n'intervient que pour refuser.
@@ -232,7 +235,8 @@ async function apiProposerCollection(req, res) {
   }
   const actuelle = await db.requete('SELECT collection FROM collections_articles WHERE code_article = $1', [codeArticle]);
 
-  const auteur = String(corps.auteur || '').trim().slice(0, 80) || null;
+  const auteur = String(corps.auteur || '').trim().slice(0, 80);
+  if (!auteur) return json(res, 400, { erreur: 'Indiquez votre nom pour envoyer la proposition.' });
   await db.requete(
     `INSERT INTO propositions_collection (code_article, ean, description, collection_actuelle, collection_proposee, auteur, statut)
      VALUES ($1, $2, $3, $4, $5, $6, 'validee')
@@ -316,13 +320,17 @@ function calculerAlertes(x, ventesMoy) {
 
 async function apiPropositions(req, res) {
   const mins = await db.requete(
-    `SELECT pr.*, p.fournisseur, p.famille, p.vpe, p.stock_depot, p.stock_depot2, p.stock_fdcm
-       FROM propositions pr LEFT JOIN produits p ON p.code_article = pr.code_article
+    `SELECT pr.*, p.fournisseur, p.famille, p.vpe, p.stock_depot, p.stock_depot2, p.stock_fdcm, ph.url AS photo
+       FROM propositions pr
+       LEFT JOIN produits p ON p.code_article = pr.code_article
+       LEFT JOIN photos_articles ph ON ph.code_article = pr.code_article
       ORDER BY pr.maj_le DESC`
   );
   const colls = await db.requete(
-    `SELECT pr.*, p.fournisseur, p.famille, p.stock_depot, p.stock_depot2, p.stock_fdcm
-       FROM propositions_collection pr LEFT JOIN produits p ON p.code_article = pr.code_article
+    `SELECT pr.*, p.fournisseur, p.famille, p.stock_depot, p.stock_depot2, p.stock_fdcm, ph.url AS photo
+       FROM propositions_collection pr
+       LEFT JOIN produits p ON p.code_article = pr.code_article
+       LEFT JOIN photos_articles ph ON ph.code_article = pr.code_article
       ORDER BY pr.maj_le DESC`
   );
   const { parCode } = await ventesMoyennes();
@@ -337,6 +345,7 @@ async function apiPropositions(req, res) {
       ean: x.ean,
       description: x.description,
       fournisseur: x.fournisseur,
+      photo: x.photo,
       minActuel: x.min_actuel,
       minPropose: x.min_propose,
       commentaire: x.commentaire,
@@ -355,6 +364,7 @@ async function apiPropositions(req, res) {
       ean: x.ean,
       description: x.description,
       fournisseur: x.fournisseur,
+      photo: x.photo,
       collectionActuelle: x.collection_actuelle,
       collectionProposee: x.collection_proposee,
       auteur: x.auteur,
@@ -424,6 +434,14 @@ async function apiImportCollections(req, res, url) {
   const { lignes, collections, avertissements } = await parserCollections(buffer);
   await db.remplacerCollections(lignes, collections, famille);
   json(res, 200, { ok: true, famille, nbArticles: lignes.length, nbCollections: collections.length, avertissements });
+}
+
+async function apiImportPhotos(req, res) {
+  const buffer = await lireCorps(req);
+  if (!buffer.length) return json(res, 400, { erreur: 'Fichier vide.' });
+  const { lignes, avertissements } = await parserPhotos(buffer);
+  await db.upsertPhotos(lignes);
+  json(res, 200, { ok: true, nbPhotos: lignes.length, avertissements });
 }
 
 async function apiCollections(req, res, url) {
@@ -578,7 +596,7 @@ const serveur = http.createServer(async (req, res) => {
       const ADMIN_ROUTES = ['/api/propositions', '/api/proposition-suppr', '/api/proposition-decision',
         '/api/import/minimums', '/api/import/ventes', '/api/import/collections',
         '/api/etat', '/api/export', '/api/scans-inconnus', '/api/scans-inconnus-vider',
-        '/api/collegues-ajout', '/api/collegues-suppr'];
+        '/api/collegues-ajout', '/api/collegues-suppr', '/api/import/photos'];
       if (ADMIN_ROUTES.includes(url.pathname) && !estAdmin(req, url)) {
         return json(res, 401, { erreur: 'Code d’accès admin invalide.' });
       }
@@ -602,6 +620,7 @@ const serveur = http.createServer(async (req, res) => {
       if (route === 'POST /api/import/minimums') return await apiImportMinimums(req, res, url);
       if (route === 'POST /api/import/ventes') return await apiImportVentes(req, res, url);
       if (route === 'POST /api/import/collections') return await apiImportCollections(req, res, url);
+      if (route === 'POST /api/import/photos') return await apiImportPhotos(req, res);
       if (route === 'GET /api/etat') return await apiEtat(req, res);
       if (route === 'GET /api/scans-inconnus') return await apiScansInconnus(req, res);
       if (route === 'POST /api/scans-inconnus-vider') return await apiScansVider(req, res);

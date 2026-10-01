@@ -73,6 +73,17 @@ async function fabriquerVentesAutomne(qte) {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+async function fabriquerPhotos() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Feuil1');
+  ws.addRow(['Artikelnummer', 'Lien photo']);
+  ws.addRow(['57913', 'https://photos.famiflora.be/goudspray.jpg']);
+  // Cellule « lien hypertexte » Excel : l'URL est à côté du texte affiché
+  ws.addRow(['99002', { text: 'voir photo', hyperlink: 'https://photos.famiflora.be/99002.jpg' }]);
+  ws.addRow(['99001', 'pas-un-lien']);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
 async function fabriquerCollectionsAutomne() {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Feuil1');
@@ -334,7 +345,7 @@ test('proposition bloquée pour un article inactif sans stock dépôt', async ()
   // 99003 : inactif mais 50 en FDCM -> autorisé
   const ok = await api('/api/proposition', {
     method: 'POST', headers: JSON_H,
-    body: JSON.stringify({ codeArticle: '99003', minPropose: 4 }),
+    body: JSON.stringify({ codeArticle: '99003', minPropose: 4, auteur: 'Test' }),
   });
   assert.strictEqual(ok.status, 200, JSON.stringify(await ok.json()));
   await api('/api/proposition-suppr?type=min&codeArticle=99003', { method: 'POST', headers: ADMIN });
@@ -405,4 +416,37 @@ test('multi-familles : importer l’Automne ne touche pas Noël', async () => {
 
   // Les familles connues alimentent les listes de choix de l'admin
   assert.deepStrictEqual((await (await api('/api/familles')).json()).familles, ['Automne', 'Noël']);
+});
+
+test('photos : import et lien dans la liste des propositions', async () => {
+  const rep = await api('/api/import/photos', { method: 'POST', headers: ADMIN, body: await fabriquerPhotos() });
+  const data = await rep.json();
+  assert.strictEqual(rep.status, 200, JSON.stringify(data));
+  assert.strictEqual(data.nbPhotos, 2); // la ligne sans lien valide est ignorée
+  assert.ok(data.avertissements.some((a) => /sans lien valide/.test(a)));
+
+  await api('/api/proposition', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', minPropose: 108, auteur: 'Kim' }),
+  });
+  const { propositions } = await (await api('/api/propositions', { headers: ADMIN })).json();
+  const p = propositions.find((x) => x.type === 'min' && x.codeArticle === '57913');
+  assert.strictEqual(p.photo, 'https://photos.famiflora.be/goudspray.jpg');
+  await api('/api/proposition-suppr?type=min&codeArticle=57913', { method: 'POST', headers: ADMIN });
+});
+
+test('le nom est obligatoire pour proposer', async () => {
+  const sansNomMin = await api('/api/proposition', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', minPropose: 100 }),
+  });
+  assert.strictEqual(sansNomMin.status, 400);
+  assert.match((await sansNomMin.json()).erreur, /votre nom/);
+
+  const sansNomColl = await api('/api/proposition-collection', {
+    method: 'POST', headers: JSON_H,
+    body: JSON.stringify({ codeArticle: '57913', collectionProposee: 'Lemax26-03' }),
+  });
+  assert.strictEqual(sansNomColl.status, 400);
+  assert.match((await sansNomColl.json()).erreur, /votre nom/);
 });

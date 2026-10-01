@@ -296,6 +296,7 @@ function afficherFiche(data) {
       enCoursColl +
       (listeCollections.length
         ? '<button type="button" class="btn-choix" id="ouvrirColl">Choisir la nouvelle collection…</button>' +
+          (listeCollegues.length ? '' : '<input class="auteur" id="auteurColl" maxlength="80" placeholder="Votre nom (obligatoire)" required />') +
           '<button class="btn-valider" id="validerColl" disabled>Proposer le changement de collection</button>'
         : '<p class="aide">Liste des collections indisponible — importez le fichier collections dans l\'admin.</p>') +
       '</div>'
@@ -336,7 +337,7 @@ function afficherFiche(data) {
         '<button type="button" id="plus">+</button>' +
       '</div>' +
       '<textarea id="commentaire" maxlength="500" placeholder="Commentaire (facultatif)"></textarea>' +
-      (listeCollegues.length ? '' : '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (facultatif)" />') +
+      (listeCollegues.length ? '' : '<input class="auteur" id="auteur" maxlength="80" placeholder="Votre nom (obligatoire)" required />') +
       '<button class="btn-valider" id="valider">Envoyer la proposition</button>' +
       '</div>') +
     blocCollection;
@@ -360,11 +361,17 @@ function afficherFiche(data) {
     const btn = document.getElementById('valider');
     const min = parseInt(nouveauMin.value, 10);
     if (!Number.isInteger(min) || min < 0) { toast('Minimum invalide.', true); return; }
+    const nomLibre = auteur ? auteur.value.trim() : '';
+    if (!listeCollegues.length && !nomLibre) {
+      toast('Indiquez votre nom pour envoyer la proposition.', true);
+      if (auteur) auteur.focus();
+      return;
+    }
     btn.disabled = true;
     const nomSession = await identite();
     if (nomSession === null) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
-    const nomAuteur = listeCollegues.length ? nomSession : (auteur ? auteur.value.trim() : '');
-    if (auteur) localStorage.setItem('famiminmax_auteur', auteur.value.trim());
+    const nomAuteur = listeCollegues.length ? nomSession : nomLibre;
+    if (nomLibre) localStorage.setItem('famiminmax_auteur', nomLibre);
     try {
       const rep = await fetch('/api/proposition', {
         method: 'POST',
@@ -484,15 +491,21 @@ function brancherCollection(p) {
     ouvrir.classList.add('rempli');
     btn.disabled = false;
   }));
+  const auteurColl = document.getElementById('auteurColl');
+  if (auteurColl) auteurColl.value = localStorage.getItem('famiminmax_auteur') || '';
   btn.addEventListener('click', async () => {
     if (!choix) { toast('Choisissez d’abord une collection.', true); return; }
+    const nomLibre = auteurColl ? auteurColl.value.trim() : '';
+    if (!listeCollegues.length && !nomLibre) {
+      toast('Indiquez votre nom pour envoyer la proposition.', true);
+      if (auteurColl) auteurColl.focus();
+      return;
+    }
     btn.disabled = true;
     const nomSession = await identite();
     if (nomSession === null) { btn.disabled = false; toast('Identifiez-vous pour envoyer la proposition.', true); return; }
-    const auteurEl = document.getElementById('auteur');
-    const auteur = listeCollegues.length
-      ? nomSession
-      : ((auteurEl ? auteurEl.value.trim() : '') || localStorage.getItem('famiminmax_auteur') || '');
+    const auteur = listeCollegues.length ? nomSession : nomLibre;
+    if (nomLibre) localStorage.setItem('famiminmax_auteur', nomLibre);
     try {
       const rep = await fetch('/api/proposition-collection', {
         method: 'POST',
