@@ -16,6 +16,8 @@ const { serveur } = require('../server');
 let base; // http://127.0.0.1:PORT
 const ADMIN = { 'X-Admin-Code': 'test-code' };
 const JSON_H = { 'Content-Type': 'application/json' };
+const F_NOEL = encodeURIComponent('Noël');
+const F_AUT = encodeURIComponent('Automne');
 
 async function fabriquerMinimums() {
   const wb = new ExcelJS.Workbook();
@@ -53,6 +55,32 @@ async function fabriquerCollections() {
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
+// Fixtures de la famille Automne (articles disjoints de Noël)
+async function fabriquerMinimumsAutomne() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Export');
+  ws.addRow(['Article', 'Description', 'VK-12', 'Stock (de marchandise)', 'Minimale Stock', 'Maximale Stock',
+    'Récolte', 'VPE', 'PA', 'Fournisseur', 'N°decommande.', 'EAN barcode', 'Actief AK', 'FDepot', 'FDepot2', 'FDCM']);
+  ws.addRow(['80001', 'Courge décorative', '30', '9', '6', '10', '0', '2', '0.5', 'Pompoen BV', 'P-1', '5400999000016', 'True', '40', '0', '0']);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function fabriquerVentesAutomne(qte) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Feuil1');
+  ws.addRow(['Artikelnummer', 'EANBarcode', 'Omschrijving artikel', 'Aantal', 'Fami (#)']);
+  ws.addRow(['80001', '5400999000016', 'Courge décorative', String(qte), qte + ',00']);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+async function fabriquerCollectionsAutomne() {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Feuil1');
+  ws.addRow(['N° art', 'Marque', 'Collectie', 'Type', 'Description', 'Code EAN']);
+  ws.addRow(['80001', '', 'Automne26-01', '', 'Courge décorative', '5400999000016']);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
 async function api(chemin, options) {
   return fetch(base + chemin, options);
 }
@@ -83,7 +111,7 @@ test('les routes admin exigent le code', async () => {
 });
 
 test('import du fichier minimums', async () => {
-  const rep = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
+  const rep = await api('/api/import/minimums?famille=' + F_NOEL, { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
   assert.strictEqual(data.nbArticles, 5); // le doublon 57913 est dédupliqué
@@ -94,18 +122,18 @@ test('import du fichier minimums', async () => {
 
 test('import des ventes de deux semaines', async () => {
   for (const [lundi, qte] of [['2026-09-14', 18], ['2026-09-21', 25]]) {
-    const rep = await api(`/api/import/ventes?semaine=${lundi}&fichier=test.xlsx`,
+    const rep = await api(`/api/import/ventes?semaine=${lundi}&famille=${F_NOEL}&fichier=test.xlsx`,
       { method: 'POST', headers: ADMIN, body: await fabriquerVentes(qte) });
     assert.strictEqual(rep.status, 200);
   }
   // Réimport de la même semaine : remplace, pas de doublon
-  const rep = await api('/api/import/ventes?semaine=2026-09-21&fichier=test2.xlsx',
+  const rep = await api(`/api/import/ventes?semaine=2026-09-21&famille=${F_NOEL}&fichier=test2.xlsx`,
     { method: 'POST', headers: ADMIN, body: await fabriquerVentes(30) });
   assert.strictEqual(rep.status, 200);
 });
 
 test('import du fichier collections', async () => {
-  const rep = await api('/api/import/collections', { method: 'POST', headers: ADMIN, body: await fabriquerCollections() });
+  const rep = await api('/api/import/collections?famille=' + F_NOEL, { method: 'POST', headers: ADMIN, body: await fabriquerCollections() });
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
   assert.strictEqual(data.nbArticles, 2); // seuls les articles avec collection
@@ -117,6 +145,7 @@ test('import du fichier collections', async () => {
 test('scan par EAN : fiche produit + ventes + collection', async () => {
   const data = await fiche('5410764216374');
   assert.strictEqual(data.produit.codeArticle, '57913');
+  assert.strictEqual(data.produit.famille, 'Noël');
   assert.strictEqual(data.produit.stockMin, 120);
   assert.strictEqual(data.produit.vk12, 248);
   assert.strictEqual(data.produit.actif, true);
@@ -277,7 +306,7 @@ test('proposition de collection : liste fermée, circuit et export', async () =>
 });
 
 test('réimport des minimums : propositions et collections survivent', async () => {
-  const rep = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
+  const rep = await api('/api/import/minimums?famille=' + F_NOEL, { method: 'POST', headers: ADMIN, body: await fabriquerMinimums() });
   assert.strictEqual(rep.status, 200);
   const etat = await (await api('/api/etat', { headers: ADMIN })).json();
   assert.strictEqual(etat.produits.nb, 5);
@@ -332,4 +361,48 @@ test('gestion des collègues (identification Zebra)', async () => {
   await api('/api/collegues-suppr?nom=Kim', { method: 'POST', headers: ADMIN });
   ({ collegues } = await (await api('/api/collegues')).json());
   assert.deepStrictEqual(collegues, ['Jimmy']);
+});
+
+test('multi-familles : importer l’Automne ne touche pas Noël', async () => {
+  // La famille est obligatoire sur les imports
+  const sansFam = await api('/api/import/minimums', { method: 'POST', headers: ADMIN, body: await fabriquerMinimumsAutomne() });
+  assert.strictEqual(sansFam.status, 400);
+
+  let rep = await api('/api/import/minimums?famille=' + F_AUT, { method: 'POST', headers: ADMIN, body: await fabriquerMinimumsAutomne() });
+  assert.strictEqual(rep.status, 200, JSON.stringify(await rep.json()));
+
+  // Noël intact, l'Automne s'ajoute
+  const etat = await (await api('/api/etat', { headers: ADMIN })).json();
+  assert.strictEqual(etat.produits.nb, 6);
+  assert.deepStrictEqual(etat.produits.parFamille, [
+    { famille: 'Automne', nb: 1 },
+    { famille: 'Noël', nb: 5 },
+  ]);
+  assert.strictEqual((await fiche('5410764216374')).produit.famille, 'Noël');
+  assert.strictEqual((await fiche('5400999000016')).produit.famille, 'Automne');
+
+  // Ventes Automne sur une semaine déjà importée pour Noël : cohabitation
+  rep = await api('/api/import/ventes?semaine=2026-09-21&famille=' + F_AUT,
+    { method: 'POST', headers: ADMIN, body: await fabriquerVentesAutomne(7) });
+  assert.strictEqual(rep.status, 200);
+  assert.deepStrictEqual((await fiche('5400999000016')).ventes.map((v) => v.qteFami), [0, 7]);
+  assert.deepStrictEqual((await fiche('5410764216374')).ventes.map((v) => v.qteFami), [18, 30]);
+
+  // Réimporter l'Automne pour la même semaine remplace l'Automne seul
+  rep = await api('/api/import/ventes?semaine=2026-09-21&famille=' + F_AUT,
+    { method: 'POST', headers: ADMIN, body: await fabriquerVentesAutomne(9) });
+  assert.strictEqual(rep.status, 200);
+  assert.deepStrictEqual((await fiche('5400999000016')).ventes.map((v) => v.qteFami), [0, 9]);
+  assert.deepStrictEqual((await fiche('5410764216374')).ventes.map((v) => v.qteFami), [18, 30]);
+
+  // Collections par famille : chaque produit ne voit que les collections de sa famille
+  rep = await api('/api/import/collections?famille=' + F_AUT,
+    { method: 'POST', headers: ADMIN, body: await fabriquerCollectionsAutomne() });
+  assert.strictEqual(rep.status, 200);
+  assert.deepStrictEqual((await (await api('/api/collections?famille=' + F_AUT)).json()).collections, ['Automne26-01']);
+  assert.deepStrictEqual((await (await api('/api/collections?famille=' + F_NOEL)).json()).collections, ['Lemax26-03', 'SugarCrush26-06']);
+  assert.strictEqual((await fiche('5400999000016')).collection, 'Automne26-01');
+
+  // Les familles connues alimentent les listes de choix de l'admin
+  assert.deepStrictEqual((await (await api('/api/familles')).json()).familles, ['Automne', 'Noël']);
 });

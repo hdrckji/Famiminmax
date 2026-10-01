@@ -195,16 +195,20 @@ document.getElementById('formScan').addEventListener('submit', (e) => {
   if (code) chercher(code);
 });
 
-let listeCollections = null;
-async function chargerCollections() {
-  if (listeCollections !== null) return listeCollections;
+// Collections proposables : filtrées par famille du produit scanné
+// (pas de collection Noël sur un produit d'automne). Cache par famille.
+let listeCollections = [];
+const cacheCollections = {};
+async function chargerCollections(famille) {
+  const cle = famille || '*';
+  if (cacheCollections[cle]) { listeCollections = cacheCollections[cle]; return; }
   try {
-    const rep = await fetch('/api/collections');
-    listeCollections = (await rep.json()).collections || [];
+    const rep = await fetch('/api/collections' + (famille ? '?famille=' + encodeURIComponent(famille) : ''));
+    cacheCollections[cle] = (await rep.json()).collections || [];
   } catch {
-    listeCollections = [];
+    cacheCollections[cle] = [];
   }
-  return listeCollections;
+  listeCollections = cacheCollections[cle];
 }
 
 // Bannière d'état d'une demande : validée d'office, l'acheteur peut refuser.
@@ -225,7 +229,7 @@ async function chercher(code) {
     const data = await rep.json();
     if (!rep.ok) { zone.innerHTML = '<p class="msg err">' + ech(data.erreur) + '</p>'; refocus(); return; }
     if (data.choix) { afficherChoix(data.choix); refocus(); return; }
-    await chargerCollections();
+    await chargerCollections(data.produit.famille);
     afficherFiche(data);
     prolongerSession();
   } catch {
@@ -309,6 +313,7 @@ function afficherFiche(data) {
     '<div class="fiche">' +
       '<h2>' + ech(p.description) + badge + '</h2>' +
       '<div class="ref">Article ' + ech(p.codeArticle) + ' · EAN ' + ech(p.ean || '—') +
+        (p.famille ? ' · ' + ech(p.famille) : '') +
         (p.fournisseur ? ' · ' + ech(p.fournisseur) : '') + '</div>' +
       '<div class="stats">' +
         '<div class="stat min"><b>' + p.stockMin + '</b><span>Min rayon</span></div>' +

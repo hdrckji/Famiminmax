@@ -117,11 +117,15 @@
   </div>
 
   <div id="vueImports" hidden>
+    <div class="det" style="margin:14px 0 4px">Chaque fichier ERP couvre <b>une famille</b> (Noël, Automne…). L'import ne remplace que les données de la famille choisie — les autres familles ne sont pas touchées.</div>
+    <datalist id="listeFamilles"></datalist>
+
     <h2>1 · Importer le fichier des minimums rayon</h2>
     <div class="carte">
-      <div class="det">Export ERP type « Beta4 » (feuille Export). Remplace tout le référentiel produits — à refaire chaque semaine ou après modification des minimums dans l'ERP.</div>
+      <div class="det">Export ERP type « Beta4 » (feuille Export). Remplace le référentiel produits de la famille choisie — à refaire chaque semaine ou après modification des minimums dans l'ERP.</div>
       <div class="ligne-form">
         <input type="file" id="fichierMin" accept=".xlsx" />
+        <label>Famille <input type="text" id="familleMin" list="listeFamilles" maxlength="40" style="width:110px" /></label>
         <button class="btn" id="btnImportMin">Importer</button>
       </div>
       <div class="resultat" id="resMin"></div>
@@ -129,10 +133,11 @@
 
     <h2>2 · Importer les ventes d'une semaine</h2>
     <div class="carte">
-      <div class="det">Export hebdomadaire agrégé (Artikelnummer / Aantal). Choisissez le <b>lundi</b> de la semaine concernée ; réimporter la même semaine remplace ses données.</div>
+      <div class="det">Export hebdomadaire agrégé (Artikelnummer / Aantal), un fichier par famille. Choisissez le <b>lundi</b> de la semaine ; réimporter la même semaine pour la même famille remplace ses données.</div>
       <div class="ligne-form">
         <input type="file" id="fichierVentes" accept=".xlsx" />
         <label>Semaine du lundi <input type="date" id="dateSemaine" /></label>
+        <label>Famille <input type="text" id="familleVentes" list="listeFamilles" maxlength="40" style="width:110px" /></label>
         <button class="btn" id="btnImportVentes">Importer</button>
       </div>
       <div class="resultat" id="resVentes"></div>
@@ -140,9 +145,10 @@
 
     <h2>3 · Importer le fichier des collections</h2>
     <div class="carte">
-      <div class="det">Export ERP avec les colonnes <b>N° art / Code EAN / Collectie</b> (type « noel collection »). Remplace le référentiel des collections et alimente la liste déroulante du scan.</div>
+      <div class="det">Export ERP avec les colonnes <b>N° art / Code EAN / Collectie</b> (type « noel collection »). Remplace les collections de la famille choisie ; le Zebra ne propose que les collections de la famille du produit scanné.</div>
       <div class="ligne-form">
         <input type="file" id="fichierColl" accept=".xlsx" />
+        <label>Famille <input type="text" id="familleColl" list="listeFamilles" maxlength="40" style="width:110px" /></label>
         <button class="btn" id="btnImportColl">Importer</button>
       </div>
       <div class="resultat" id="resColl"></div>
@@ -238,11 +244,15 @@ function ech(s) {
 
 function afficherEtat(etat) {
   document.getElementById('nbProduits').textContent = etat.produits.nb.toLocaleString('fr-BE');
-  document.getElementById('majProduits').textContent = etat.produits.majLe ? 'Dernier import : ' + fdatetime(etat.produits.majLe) : 'Aucun import pour le moment.';
+  const parFam = (etat.produits.parFamille || []).map((f) => ech(f.famille) + ' : ' + f.nb.toLocaleString('fr-BE')).join(' · ');
+  document.getElementById('majProduits').innerHTML =
+    (parFam ? parFam + '<br>' : '') +
+    (etat.produits.majLe ? 'Dernier import : ' + fdatetime(etat.produits.majLe) : 'Aucun import pour le moment.');
   document.getElementById('nbSemaines').textContent = etat.semaines.length;
   document.getElementById('listeSemaines').innerHTML = etat.semaines.slice(0, 5).map((s) => {
     const fin = new Date(s.debut + 'T12:00:00'); fin.setDate(fin.getDate() + 6);
-    return '<li>Du <b>' + fdate(s.debut + 'T12:00:00') + '</b> au <b>' + fdate(fin.toISOString()) + '</b> — ' + s.nbLignes + ' articles</li>';
+    const fams = (s.parFamille || []).map((f) => ech(f.famille) + ' : ' + f.nb).join(' · ');
+    return '<li>Du <b>' + fdate(s.debut + 'T12:00:00') + '</b> au <b>' + fdate(fin.toISOString()) + '</b> — ' + (fams || s.nbLignes + ' articles') + '</li>';
   }).join('');
   document.getElementById('nbCollections').textContent = (etat.collections ? etat.collections.nbArticles : 0).toLocaleString('fr-BE');
   document.getElementById('nbValidees').textContent = etat.propositions.validees || 0;
@@ -256,6 +266,32 @@ function afficherEtat(etat) {
   d.setDate(d.getDate() - jour - 7);
   document.getElementById('dateSemaine').value = d.toISOString().slice(0, 10);
 })();
+
+// Familles : liste de suggestions + dernière famille utilisée par défaut
+(function () {
+  const defaut = localStorage.getItem('famiminmax_famille') || 'Noël';
+  ['familleMin', 'familleVentes', 'familleColl'].forEach((id) => { document.getElementById(id).value = defaut; });
+})();
+async function chargerFamilles() {
+  try {
+    const rep = await fetch('/api/familles');
+    const { familles } = await rep.json();
+    const toutes = [...new Set(['Noël', 'Automne', ...familles])];
+    document.getElementById('listeFamilles').innerHTML =
+      toutes.map((f) => '<option value="' + ech(f) + '"></option>').join('');
+  } catch { /* suggestions indisponibles, la saisie libre reste possible */ }
+}
+chargerFamilles();
+
+function lireFamilleChamp(id, idRes) {
+  const fam = document.getElementById(id).value.trim();
+  if (!fam) {
+    afficherResultat(idRes, false, 'Indiquez la famille du fichier (ex. Noël, Automne).');
+    return null;
+  }
+  localStorage.setItem('famiminmax_famille', fam);
+  return fam;
+}
 
 function afficherResultat(id, ok, texte) {
   const el = document.getElementById(id);
@@ -282,16 +318,21 @@ async function importer(idFichier, url, idRes, bouton) {
 }
 
 document.getElementById('btnImportMin').addEventListener('click', async (e) => {
-  const data = await importer('fichierMin', '/api/import/minimums', 'resMin', e.target);
+  const fam = lireFamilleChamp('familleMin', 'resMin');
+  if (!fam) return;
+  const data = await importer('fichierMin', '/api/import/minimums?famille=' + encodeURIComponent(fam), 'resMin', e.target);
   if (data) {
-    afficherResultat('resMin', true, '✓ ' + data.nbArticles.toLocaleString('fr-BE') + ' articles importés, dont ' +
+    afficherResultat('resMin', true, '✓ ' + ech(fam) + ' : ' + data.nbArticles.toLocaleString('fr-BE') + ' articles importés, dont ' +
       data.nbAvecMin.toLocaleString('fr-BE') + ' avec un minimum > 0.' +
       (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
     demarrer();
+    chargerFamilles();
   }
 });
 
 document.getElementById('btnImportVentes').addEventListener('click', async (e) => {
+  const fam = lireFamilleChamp('familleVentes', 'resVentes');
+  if (!fam) return;
   const semaine = document.getElementById('dateSemaine').value;
   if (!semaine) { afficherResultat('resVentes', false, 'Choisissez le lundi de la semaine.'); return; }
   const d = new Date(semaine + 'T12:00:00');
@@ -299,9 +340,10 @@ document.getElementById('btnImportVentes').addEventListener('click', async (e) =
   const nomFichier = document.getElementById('fichierVentes').files.length
     ? document.getElementById('fichierVentes').files[0].name : '';
   const data = await importer('fichierVentes',
-    '/api/import/ventes?semaine=' + semaine + '&fichier=' + encodeURIComponent(nomFichier), 'resVentes', e.target);
+    '/api/import/ventes?semaine=' + semaine + '&famille=' + encodeURIComponent(fam) +
+    '&fichier=' + encodeURIComponent(nomFichier), 'resVentes', e.target);
   if (data) {
-    afficherResultat('resVentes', true, '✓ Semaine du ' + fdate(semaine + 'T12:00:00') + ' : ' +
+    afficherResultat('resVentes', true, '✓ ' + ech(fam) + ', semaine du ' + fdate(semaine + 'T12:00:00') + ' : ' +
       data.nbLignes.toLocaleString('fr-BE') + ' articles, ' + data.nbPieces.toLocaleString('fr-BE') + ' pièces vendues.' +
       (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
     demarrer();
@@ -334,7 +376,9 @@ function ligneProposition(p, actions, avecChiffres) {
     : '';
   return '<tr' + ((p.alertes || []).length ? ' class="ligne-alerte"' : '') + '>' +
     '<td>' + ech(p.codeArticle) + '</td>' +
-    '<td>' + ech(p.description) + (p.fournisseur ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">' + ech(p.fournisseur) + '</span>' : '') +
+    '<td>' + ech(p.description) +
+      ((p.famille || p.fournisseur) ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">' +
+        [p.famille, p.fournisseur].filter(Boolean).map(ech).join(' · ') + '</span>' : '') +
       (p.commentaire ? '<br><span style="font-size:11.5px;color:var(--ink-soft)">💬 ' + ech(p.commentaire) + '</span>' : '') +
       (p.motifRefus ? '<br><span class="motif">Refus : ' + ech(p.motifRefus) + '</span>' : '') + '</td>' +
     '<td>' + celluleDemande(p) + puce(demandeAlerte) + '</td>' +
@@ -409,9 +453,11 @@ async function chargerPropositions() {
 }
 
 document.getElementById('btnImportColl').addEventListener('click', async (e) => {
-  const data = await importer('fichierColl', '/api/import/collections', 'resColl', e.target);
+  const fam = lireFamilleChamp('familleColl', 'resColl');
+  if (!fam) return;
+  const data = await importer('fichierColl', '/api/import/collections?famille=' + encodeURIComponent(fam), 'resColl', e.target);
   if (data) {
-    afficherResultat('resColl', true, '✓ ' + data.nbArticles.toLocaleString('fr-BE') + ' articles avec collection, ' +
+    afficherResultat('resColl', true, '✓ ' + ech(fam) + ' : ' + data.nbArticles.toLocaleString('fr-BE') + ' articles avec collection, ' +
       data.nbCollections + ' collections distinctes.' +
       (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
     demarrer();

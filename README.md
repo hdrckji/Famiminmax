@@ -35,6 +35,13 @@ pour les repérer) et exporte les validées en Excel au format d'import ERP.
 | ⚠ écart | min proposé ×N ou ÷N par rapport à l'actuel | `SEUIL_VARIATION` (5) |
 | ⚠ VPE | min proposé non multiple du VPE | — |
 
+## Familles
+
+Chaque fichier ERP couvre **une famille** (Noël, Automne…) : la famille se choisit à l'import,
+et l'import ne remplace que les données de sa famille. Les familles cohabitent : le scan
+retrouve n'importe quel produit, la fiche affiche sa famille, et le sélecteur de collections
+ne propose que les collections de la famille du produit scanné.
+
 ## Fichiers attendus
 
 | Import | Source ERP | Colonnes clés |
@@ -49,8 +56,9 @@ automatiquement l'EAN-13 à zéro de tête.
 
 ## Routine hebdomadaire
 
-1. Exporter depuis l'ERP : minimums, ventes de la semaine écoulée, collections.
-2. Sur `/admin` : importer les trois (choisir le **lundi** de la semaine pour les ventes).
+1. Exporter depuis l'ERP, **par famille** : minimums, ventes de la semaine écoulée, collections.
+2. Sur `/admin` : importer les fichiers en choisissant la famille (et le **lundi** de la
+   semaine pour les ventes).
 3. Passer en revue les propositions (refuser les douteuses), puis « Minimums validés
    (format ERP) » → fichier `adaptations-minimums-AAAA-MM-JJ.xlsx` → import dans l'ERP.
    Idem pour les collections (format provisoire, à caler sur l'ERP).

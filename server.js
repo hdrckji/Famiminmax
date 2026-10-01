@@ -61,6 +61,12 @@ function estAdmin(req, url) {
   return code === ADMIN_CODE;
 }
 
+// Famille obligatoire sur les imports (« Noël », « Automne »…) : chaque fichier
+// ERP ne couvre qu'une famille et son import ne remplace que la sienne.
+function lireFamille(url) {
+  return (url.searchParams.get('famille') || '').trim().slice(0, 40);
+}
+
 function dateISO(d) {
   if (d == null) return null;
   if (d instanceof Date) return d.toISOString().slice(0, 10);
@@ -113,6 +119,7 @@ async function apiProduit(req, res, url) {
   json(res, 200, {
     produit: {
       codeArticle: p.code_article,
+      famille: p.famille,
       ean: p.ean,
       description: p.description,
       stockMin: p.stock_min,
@@ -309,12 +316,12 @@ function calculerAlertes(x, ventesMoy) {
 
 async function apiPropositions(req, res) {
   const mins = await db.requete(
-    `SELECT pr.*, p.fournisseur, p.vpe, p.stock_depot, p.stock_depot2, p.stock_fdcm
+    `SELECT pr.*, p.fournisseur, p.famille, p.vpe, p.stock_depot, p.stock_depot2, p.stock_fdcm
        FROM propositions pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ORDER BY pr.maj_le DESC`
   );
   const colls = await db.requete(
-    `SELECT pr.*, p.fournisseur, p.stock_depot, p.stock_depot2, p.stock_fdcm
+    `SELECT pr.*, p.fournisseur, p.famille, p.stock_depot, p.stock_depot2, p.stock_fdcm
        FROM propositions_collection pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ORDER BY pr.maj_le DESC`
   );
@@ -326,6 +333,7 @@ async function apiPropositions(req, res) {
     ...mins.rows.map((x) => ({
       type: 'min',
       codeArticle: x.code_article,
+      famille: x.famille,
       ean: x.ean,
       description: x.description,
       fournisseur: x.fournisseur,
@@ -343,6 +351,7 @@ async function apiPropositions(req, res) {
     ...colls.rows.map((x) => ({
       type: 'collection',
       codeArticle: x.code_article,
+      famille: x.famille,
       ean: x.ean,
       description: x.description,
       fournisseur: x.fournisseur,
@@ -369,13 +378,16 @@ async function apiSupprimerProposition(req, res, url) {
   json(res, 200, { ok: true });
 }
 
-async function apiImportMinimums(req, res) {
+async function apiImportMinimums(req, res, url) {
+  const famille = lireFamille(url);
+  if (!famille) return json(res, 400, { erreur: 'Paramètre "famille" manquant (ex. Noël, Automne).' });
   const buffer = await lireCorps(req);
   if (!buffer.length) return json(res, 400, { erreur: 'Fichier vide.' });
   const { articles, avertissements } = await parserMinimums(buffer);
-  await db.remplacerProduits(articles);
+  await db.remplacerProduits(articles, famille);
   json(res, 200, {
     ok: true,
+    famille,
     nbArticles: articles.length,
     nbAvecMin: articles.filter((a) => a.stockMin > 0).length,
     avertissements,
@@ -383,6 +395,8 @@ async function apiImportMinimums(req, res) {
 }
 
 async function apiImportVentes(req, res, url) {
+  const famille = lireFamille(url);
+  if (!famille) return json(res, 400, { erreur: 'Paramètre "famille" manquant (ex. Noël, Automne).' });
   const semaine = url.searchParams.get('semaine') || '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(semaine)) {
     return json(res, 400, { erreur: 'Paramètre "semaine" attendu au format YYYY-MM-DD (lundi de la semaine).' });
@@ -391,27 +405,39 @@ async function apiImportVentes(req, res, url) {
   const buffer = await lireCorps(req);
   if (!buffer.length) return json(res, 400, { erreur: 'Fichier vide.' });
   const { lignes, avertissements } = await parserVentes(buffer);
-  await db.remplacerVentesSemaine(semaine, fichier, lignes);
+  await db.remplacerVentesSemaine(semaine, fichier, lignes, famille);
   json(res, 200, {
     ok: true,
     semaine,
+    famille,
     nbLignes: lignes.length,
     nbPieces: Math.round(lignes.reduce((s, l) => s + l.qteTotale, 0)),
     avertissements,
   });
 }
 
-async function apiImportCollections(req, res) {
+async function apiImportCollections(req, res, url) {
+  const famille = lireFamille(url);
+  if (!famille) return json(res, 400, { erreur: 'Paramètre "famille" manquant (ex. Noël, Automne).' });
   const buffer = await lireCorps(req);
   if (!buffer.length) return json(res, 400, { erreur: 'Fichier vide.' });
   const { lignes, collections, avertissements } = await parserCollections(buffer);
-  await db.remplacerCollections(lignes, collections);
-  json(res, 200, { ok: true, nbArticles: lignes.length, nbCollections: collections.length, avertissements });
+  await db.remplacerCollections(lignes, collections, famille);
+  json(res, 200, { ok: true, famille, nbArticles: lignes.length, nbCollections: collections.length, avertissements });
 }
 
-async function apiCollections(req, res) {
-  const r = await db.requete('SELECT nom FROM collections ORDER BY nom');
+async function apiCollections(req, res, url) {
+  const famille = lireFamille(url);
+  const r = famille
+    ? await db.requete('SELECT nom FROM collections WHERE famille = $1 ORDER BY nom', [famille])
+    : await db.requete('SELECT nom FROM collections ORDER BY nom');
   json(res, 200, { collections: r.rows.map((x) => x.nom) });
+}
+
+// Familles connues (pour les listes de choix de l'admin).
+async function apiFamilles(req, res) {
+  const r = await db.requete('SELECT DISTINCT famille FROM produits ORDER BY famille');
+  json(res, 200, { familles: r.rows.map((x) => x.famille) });
 }
 
 // Liste des collègues pour l'identification sur les Zebra (gérée dans l'admin).
@@ -454,7 +480,9 @@ async function apiScansVider(req, res) {
 
 async function apiEtat(req, res) {
   const prod = await db.requete('SELECT COUNT(*)::int AS nb, MAX(maj_le) AS maj FROM produits');
+  const prodFam = await db.requete('SELECT famille, COUNT(*)::int AS nb FROM produits GROUP BY famille ORDER BY famille');
   const sem = await db.requete('SELECT debut, nb_lignes, importe_le FROM semaines_ventes ORDER BY debut DESC LIMIT 8');
+  const semFam = await db.requete('SELECT semaine, famille, COUNT(*)::int AS nb FROM lignes_ventes GROUP BY semaine, famille');
   const coll = await db.requete('SELECT COUNT(*)::int AS nb FROM collections_articles');
   const compte = async (table) => (await db.requete(
     `SELECT COUNT(*)::int AS total,
@@ -465,8 +493,19 @@ async function apiEtat(req, res) {
   const pMin = await compte('propositions');
   const pColl = await compte('propositions_collection');
   json(res, 200, {
-    produits: { nb: prod.rows[0].nb, majLe: prod.rows[0].maj },
-    semaines: sem.rows.map((s) => ({ debut: dateISO(s.debut), nbLignes: s.nb_lignes, importeLe: s.importe_le })),
+    produits: {
+      nb: prod.rows[0].nb,
+      majLe: prod.rows[0].maj,
+      parFamille: prodFam.rows.map((x) => ({ famille: x.famille, nb: x.nb })),
+    },
+    semaines: sem.rows.map((s) => ({
+      debut: dateISO(s.debut),
+      nbLignes: s.nb_lignes,
+      importeLe: s.importe_le,
+      parFamille: semFam.rows
+        .filter((x) => dateISO(x.semaine) === dateISO(s.debut))
+        .map((x) => ({ famille: x.famille, nb: x.nb })),
+    })),
     collections: { nbArticles: coll.rows[0].nb },
     propositions: {
       total: (pMin.total || 0) + (pColl.total || 0),
@@ -484,7 +523,7 @@ async function apiExport(req, res, url) {
   const table = type === 'collection' ? 'propositions_collection' : 'propositions';
   const filtre = mode === 'validees' ? "WHERE pr.statut = 'validee'" : "WHERE pr.statut IN ('validee', 'traitee')";
   const r = await db.requete(
-    `SELECT pr.*, p.fournisseur, p.num_commande, p.vpe, p.stock_max
+    `SELECT pr.*, p.fournisseur, p.num_commande, p.vpe, p.stock_max, p.famille
        FROM ${table} pr LEFT JOIN produits p ON p.code_article = pr.code_article
       ${filtre}
       ORDER BY pr.maj_le DESC`
@@ -552,16 +591,17 @@ const serveur = http.createServer(async (req, res) => {
       if (route === 'GET /api/produit') return await apiProduit(req, res, url);
       if (route === 'POST /api/proposition') return await apiProposer(req, res);
       if (route === 'POST /api/proposition-collection') return await apiProposerCollection(req, res);
-      if (route === 'GET /api/collections') return await apiCollections(req, res);
+      if (route === 'GET /api/collections') return await apiCollections(req, res, url);
+      if (route === 'GET /api/familles') return await apiFamilles(req, res);
       if (route === 'GET /api/collegues') return await apiCollegues(req, res);
       if (route === 'POST /api/collegues-ajout') return await apiCollegueAjout(req, res);
       if (route === 'POST /api/collegues-suppr') return await apiCollegueSuppr(req, res, url);
       if (route === 'GET /api/propositions') return await apiPropositions(req, res);
       if (route === 'POST /api/proposition-suppr') return await apiSupprimerProposition(req, res, url);
       if (route === 'POST /api/proposition-decision') return await apiDecision(req, res);
-      if (route === 'POST /api/import/minimums') return await apiImportMinimums(req, res);
+      if (route === 'POST /api/import/minimums') return await apiImportMinimums(req, res, url);
       if (route === 'POST /api/import/ventes') return await apiImportVentes(req, res, url);
-      if (route === 'POST /api/import/collections') return await apiImportCollections(req, res);
+      if (route === 'POST /api/import/collections') return await apiImportCollections(req, res, url);
       if (route === 'GET /api/etat') return await apiEtat(req, res);
       if (route === 'GET /api/scans-inconnus') return await apiScansInconnus(req, res);
       if (route === 'POST /api/scans-inconnus-vider') return await apiScansVider(req, res);
