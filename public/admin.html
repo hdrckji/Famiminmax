@@ -30,7 +30,7 @@
   .carte .det{font-size:12.5px;color:var(--ink-soft)}
   .carte ul{margin:6px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--ink-soft)}
   .carte li b{color:var(--ink)}
-  input[type=file],input[type=date]{font:inherit;font-size:13.5px;padding:8px;border-radius:9px;border:2px solid var(--bord);background:#fff;max-width:100%}
+  input[type=file],input[type=date],select.sel-famille{font:inherit;font-size:13.5px;padding:8px;border-radius:9px;border:2px solid var(--bord);background:#fff;max-width:100%}
   .btn{font:inherit;font-size:14px;font-weight:700;padding:10px 18px;border-radius:11px;cursor:pointer;
     background:linear-gradient(180deg,#96c93f 0%,var(--lichtgroen) 70%,var(--donkergroen) 100%);
     color:#12321f;border:2px solid var(--donkergroen);box-shadow:2px 2px 0 var(--donkergroen)}
@@ -118,14 +118,13 @@
 
   <div id="vueImports" hidden>
     <div class="det" style="margin:14px 0 4px">Chaque fichier ERP couvre <b>une famille</b> (Noël, Automne…). L'import ne remplace que les données de la famille choisie — les autres familles ne sont pas touchées.</div>
-    <datalist id="listeFamilles"></datalist>
 
     <h2>1 · Importer le fichier des minimums rayon</h2>
     <div class="carte">
       <div class="det">Export ERP type « Beta4 » (feuille Export). Remplace le référentiel produits de la famille choisie — à refaire chaque semaine ou après modification des minimums dans l'ERP.</div>
       <div class="ligne-form">
         <input type="file" id="fichierMin" accept=".xlsx" />
-        <label>Famille <input type="text" id="familleMin" list="listeFamilles" maxlength="40" style="width:110px" /></label>
+        <label>Famille <select id="familleMin" class="sel-famille"></select></label>
         <button class="btn" id="btnImportMin">Importer</button>
       </div>
       <div class="resultat" id="resMin"></div>
@@ -137,7 +136,7 @@
       <div class="ligne-form">
         <input type="file" id="fichierVentes" accept=".xlsx" />
         <label>Semaine du lundi <input type="date" id="dateSemaine" /></label>
-        <label>Famille <input type="text" id="familleVentes" list="listeFamilles" maxlength="40" style="width:110px" /></label>
+        <label>Famille <select id="familleVentes" class="sel-famille"></select></label>
         <button class="btn" id="btnImportVentes">Importer</button>
       </div>
       <div class="resultat" id="resVentes"></div>
@@ -148,7 +147,7 @@
       <div class="det">Export ERP avec les colonnes <b>N° art / Code EAN / Collectie</b> (type « noel collection »). Remplace les collections de la famille choisie ; le Zebra ne propose que les collections de la famille du produit scanné.</div>
       <div class="ligne-form">
         <input type="file" id="fichierColl" accept=".xlsx" />
-        <label>Famille <input type="text" id="familleColl" list="listeFamilles" maxlength="40" style="width:110px" /></label>
+        <label>Famille <select id="familleColl" class="sel-famille"></select></label>
         <button class="btn" id="btnImportColl">Importer</button>
       </div>
       <div class="resultat" id="resColl"></div>
@@ -267,26 +266,51 @@ function afficherEtat(etat) {
   document.getElementById('dateSemaine').value = d.toISOString().slice(0, 10);
 })();
 
-// Familles : liste de suggestions + dernière famille utilisée par défaut
-(function () {
-  const defaut = localStorage.getItem('famiminmax_famille') || 'Noël';
-  ['familleMin', 'familleVentes', 'familleColl'].forEach((id) => { document.getElementById(id).value = defaut; });
-})();
+// Familles : vrais menus déroulants (familles connues + « Autre… » pour en créer une)
+const SELECTS_FAMILLE = ['familleMin', 'familleVentes', 'familleColl'];
+function remplirSelectsFamilles(familles) {
+  const connues = [...new Set(['Noël', 'Automne', ...familles])];
+  const memo = localStorage.getItem('famiminmax_famille') || 'Noël';
+  SELECTS_FAMILLE.forEach((id) => {
+    const sel = document.getElementById(id);
+    const courante = sel.value && sel.value !== '__autre' ? sel.value : memo;
+    sel.innerHTML = connues.map((f) => '<option value="' + ech(f) + '">' + ech(f) + '</option>').join('') +
+      '<option value="__autre">➕ Autre…</option>';
+    sel.value = connues.includes(courante) ? courante : 'Noël';
+  });
+}
 async function chargerFamilles() {
+  let familles = [];
   try {
-    const rep = await fetch('/api/familles');
-    const { familles } = await rep.json();
-    const toutes = [...new Set(['Noël', 'Automne', ...familles])];
-    document.getElementById('listeFamilles').innerHTML =
-      toutes.map((f) => '<option value="' + ech(f) + '"></option>').join('');
-  } catch { /* suggestions indisponibles, la saisie libre reste possible */ }
+    familles = (await (await fetch('/api/familles')).json()).familles || [];
+  } catch { /* sans réseau, les familles par défaut restent disponibles */ }
+  remplirSelectsFamilles(familles);
 }
 chargerFamilles();
 
+SELECTS_FAMILLE.forEach((id) => {
+  const sel = document.getElementById(id);
+  let precedente = 'Noël';
+  sel.addEventListener('focus', () => { if (sel.value !== '__autre') precedente = sel.value; });
+  sel.addEventListener('change', () => {
+    if (sel.value !== '__autre') { precedente = sel.value; return; }
+    const nom = (prompt('Nom de la nouvelle famille (ex. Printemps) :') || '').trim().slice(0, 40);
+    if (!nom) { sel.value = precedente; return; }
+    if (![...sel.options].some((o) => o.value === nom)) {
+      const opt = document.createElement('option');
+      opt.value = nom;
+      opt.textContent = nom;
+      sel.insertBefore(opt, sel.querySelector('option[value="__autre"]'));
+    }
+    sel.value = nom;
+    precedente = nom;
+  });
+});
+
 function lireFamilleChamp(id, idRes) {
-  const fam = document.getElementById(id).value.trim();
-  if (!fam) {
-    afficherResultat(idRes, false, 'Indiquez la famille du fichier (ex. Noël, Automne).');
+  const fam = document.getElementById(id).value;
+  if (!fam || fam === '__autre') {
+    afficherResultat(idRes, false, 'Choisissez la famille du fichier (ex. Noël, Automne).');
     return null;
   }
   localStorage.setItem('famiminmax_famille', fam);
