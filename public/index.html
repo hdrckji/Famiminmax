@@ -212,6 +212,29 @@ document.getElementById('formScan').addEventListener('submit', (e) => {
   if (code) chercher(code);
 });
 
+// Filet de sécurité kiosk : certains navigateurs bridés font perdre le focus
+// au champ de scan, et les touches injectées par DataWedge partent dans le
+// vide. On les capte au niveau du document et on les re-route vers le champ.
+// La saisie normale dans un autre champ (nom, recherche collection…) n'est
+// pas touchée.
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const t = e.target;
+  if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) return;
+  if (e.key === 'Enter') {
+    const code = champ.value.trim();
+    if (!code) return; // Entrée sans scan en cours : comportement normal
+    e.preventDefault();
+    champ.value = '';
+    chercher(code);
+    return;
+  }
+  if (e.key.length === 1) {
+    e.preventDefault();
+    champ.value += e.key;
+  }
+});
+
 // Collections proposables : filtrées par famille du produit scanné
 // (pas de collection Noël sur un produit d'automne). Cache par famille.
 let listeCollections = [];
