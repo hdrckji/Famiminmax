@@ -441,7 +441,19 @@ async function apiImportPhotos(req, res) {
   if (!buffer.length) return json(res, 400, { erreur: 'Fichier vide.' });
   const { lignes, avertissements } = await parserPhotos(buffer);
   await db.upsertPhotos(lignes);
-  json(res, 200, { ok: true, nbPhotos: lignes.length, avertissements });
+  // Bilan par famille : un même fichier peut mélanger Noël, Automne…
+  const familles = await db.famillesPourCodes(lignes.map((l) => l.codeArticle));
+  const compte = new Map();
+  let nbInconnus = 0;
+  for (const l of lignes) {
+    const fam = familles.get(l.codeArticle);
+    if (fam == null) { nbInconnus++; continue; }
+    compte.set(fam, (compte.get(fam) || 0) + 1);
+  }
+  const parFamille = [...compte.entries()]
+    .map(([famille, nb]) => ({ famille, nb }))
+    .sort((a, b) => a.famille.localeCompare(b.famille, 'fr'));
+  json(res, 200, { ok: true, nbPhotos: lignes.length, parFamille, nbInconnus, avertissements });
 }
 
 async function apiCollections(req, res, url) {

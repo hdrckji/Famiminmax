@@ -156,7 +156,7 @@
 
     <h2>4 · Importer les photos des articles</h2>
     <div class="carte">
-      <div class="det">Excel avec le <b>numéro d'article</b> et le <b>lien web de la photo</b> (colonnes repérées par intitulé). Fusion : les photos s'ajoutent ou se mettent à jour, un fichier par famille n'efface pas les autres. Les vignettes apparaissent dans les tableaux de propositions.</div>
+      <div class="det"><b>Toutes familles confondues</b> (Noël, Automne…) — pas de famille à choisir ici : la photo suit le numéro d'article. Excel avec le <b>numéro d'article</b> et le <b>lien web de la photo</b> (colonnes repérées par intitulé, sur n'importe quelle feuille). Fusion : les photos s'ajoutent ou se mettent à jour sans effacer celles des autres familles. Les vignettes apparaissent dans les tableaux de propositions.</div>
       <div class="ligne-form">
         <input type="file" id="fichierPhotos" accept=".xlsx" />
         <button class="btn" id="btnImportPhotos">Importer</button>
@@ -494,7 +494,10 @@ async function chargerPropositions() {
 document.getElementById('btnImportPhotos').addEventListener('click', async (e) => {
   const data = await importer('fichierPhotos', '/api/import/photos', 'resPhotos', e.target);
   if (data) {
-    afficherResultat('resPhotos', true, '✓ ' + data.nbPhotos.toLocaleString('fr-BE') + ' photo(s) ajoutée(s) ou mise(s) à jour.' +
+    const detFam = (data.parFamille || []).map((f) => f.famille + ' : ' + f.nb.toLocaleString('fr-BE'));
+    if (data.nbInconnus) detFam.push('hors référentiel : ' + data.nbInconnus.toLocaleString('fr-BE'));
+    afficherResultat('resPhotos', true, '✓ ' + data.nbPhotos.toLocaleString('fr-BE') + ' photo(s) ajoutée(s) ou mise(s) à jour' +
+      (detFam.length ? ' (' + detFam.join(' · ') + ')' : '') + '.' +
       (data.avertissements.length ? ' — ' + data.avertissements.join(' ') : ''));
     chargerPropositions();
   }

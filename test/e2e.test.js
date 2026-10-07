@@ -81,6 +81,8 @@ async function fabriquerPhotos() {
   // Cellule « lien hypertexte » Excel : l'URL est à côté du texte affiché
   ws.addRow(['99002', { text: 'voir photo', hyperlink: 'https://photos.famiflora.be/99002.jpg' }]);
   ws.addRow(['99001', 'pas-un-lien']);
+  // Article Automne dans le même fichier (toutes familles confondues) + lien sans https://
+  ws.addRow(['80001', 'www.photos.famiflora.be/courge.jpg']);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
 
@@ -422,8 +424,11 @@ test('photos : import et lien dans la liste des propositions', async () => {
   const rep = await api('/api/import/photos', { method: 'POST', headers: ADMIN, body: await fabriquerPhotos() });
   const data = await rep.json();
   assert.strictEqual(rep.status, 200, JSON.stringify(data));
-  assert.strictEqual(data.nbPhotos, 2); // la ligne sans lien valide est ignorée
+  assert.strictEqual(data.nbPhotos, 3); // la ligne sans lien valide est ignorée
   assert.ok(data.avertissements.some((a) => /sans lien valide/.test(a)));
+  // Un même fichier mélange Noël et Automne : le bilan le montre
+  assert.deepStrictEqual(data.parFamille, [{ famille: 'Automne', nb: 1 }, { famille: 'Noël', nb: 2 }]);
+  assert.strictEqual(data.nbInconnus, 0);
 
   await api('/api/proposition', {
     method: 'POST', headers: JSON_H,
@@ -433,6 +438,24 @@ test('photos : import et lien dans la liste des propositions', async () => {
   const p = propositions.find((x) => x.type === 'min' && x.codeArticle === '57913');
   assert.strictEqual(p.photo, 'https://photos.famiflora.be/goudspray.jpg');
   await api('/api/proposition-suppr?type=min&codeArticle=57913', { method: 'POST', headers: ADMIN });
+});
+
+test('photos : fichier fournisseur (titre au-dessus, entêtes en ligne 3, lien www)', async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Photos automne');
+  ws.addRow(['Photos articles automne 2026']);
+  ws.addRow([]);
+  ws.addRow(['Art. nr', 'Afbeelding']);
+  ws.addRow(['80001', 'www.photos.famiflora.be/courge-v2.jpg']);
+  ws.addRow(['00000', 'https://photos.famiflora.be/inconnu.jpg']); // hors référentiel
+  const rep = await api('/api/import/photos', { method: 'POST', headers: ADMIN, body: Buffer.from(await wb.xlsx.writeBuffer()) });
+  const data = await rep.json();
+  assert.strictEqual(rep.status, 200, JSON.stringify(data));
+  assert.strictEqual(data.nbPhotos, 2);
+  assert.deepStrictEqual(data.parFamille, [{ famille: 'Automne', nb: 1 }]);
+  assert.strictEqual(data.nbInconnus, 1);
+  const { rows } = await db.requete("SELECT url FROM photos_articles WHERE code_article = '80001'");
+  assert.strictEqual(rows[0].url, 'https://www.photos.famiflora.be/courge-v2.jpg');
 });
 
 test('le nom est obligatoire pour proposer', async () => {
