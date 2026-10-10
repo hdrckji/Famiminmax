@@ -323,9 +323,34 @@ test('proposition de collection : liste fermée, circuit et export', async () =>
   const wsTags = wb.getWorksheet('Import tags');
   assert.strictEqual(wsTags.rowCount, 2);
   assert.strictEqual(wsTags.getRow(2).getCell(1).value, '57913');
-  assert.strictEqual(wsTags.getRow(2).getCell(2).value, 'SugarCrush26');
+  assert.strictEqual(wsTags.getRow(2).getCell(2).value, 'Lemax26'); // tag initial (Lemax26-03)
+  assert.strictEqual(wsTags.getRow(2).getCell(3).value, 'SugarCrush26'); // nouveau tag
 
   assert.strictEqual((await fiche('57913')).propositionCollection.statut, 'traitee');
+});
+
+test('feuille Import tags : seulement les articles dont le tag change', async () => {
+  const { genererExportCollections } = require('../lib/export');
+  const buf = await genererExportCollections([
+    { code_article: '11111', collection_actuelle: 'Lemax26-03', collection_proposee: 'Lemax26-05' }, // même tag
+    { code_article: '22222', collection_actuelle: 'Lemax26-03', collection_proposee: 'SugarCrush26-06' },
+    { code_article: '33333', collection_actuelle: 'SugarCrush26-06', collection_proposee: 'Emballages' }, // plus de tag
+  ]);
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(buf);
+
+  // Les 3 articles vont dans « Import collections »...
+  const wsColl = wb.getWorksheet('Import collections');
+  assert.strictEqual(wsColl.rowCount, 4);
+  // ... mais 11111 (Lemax26 -> Lemax26) est exclu d'« Import tags »
+  const wsTags = wb.getWorksheet('Import tags');
+  assert.strictEqual(wsTags.rowCount, 3);
+  assert.strictEqual(wsTags.getRow(2).getCell(1).value, '22222');
+  assert.strictEqual(wsTags.getRow(2).getCell(2).value, 'Lemax26');
+  assert.strictEqual(wsTags.getRow(2).getCell(3).value, 'SugarCrush26');
+  assert.strictEqual(wsTags.getRow(3).getCell(1).value, '33333');
+  assert.strictEqual(wsTags.getRow(3).getCell(2).value, 'SugarCrush26');
+  assert.ok(!wsTags.getRow(3).getCell(3).value); // aucun tag ne correspond : cellule vide
 });
 
 test('tag déduit de la collection (variantes réelles des exports ERP)', () => {
