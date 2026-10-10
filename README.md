@@ -61,7 +61,10 @@ automatiquement l'EAN-13 à zéro de tête.
    semaine pour les ventes).
 3. Passer en revue les propositions (refuser les douteuses), puis « Minimums validés
    (format ERP) » → fichier `adaptations-minimums-AAAA-MM-JJ.xlsx` → import dans l'ERP.
-   Idem pour les collections (format provisoire, à caler sur l'ERP).
+   Idem pour les collections : le fichier contient une feuille « vue d'ensemble »
+   et deux feuilles prêtes à importer dans Beco — « Import collections » (n° article +
+   collection) et « Import tags » (n° article + tag déduit de la collection, p. ex.
+   `SugarCrush26-06` → `SugarCrush26` ; cellule vide surlignée si aucun tag ne correspond).
 
 ## Déploiement Railway
 

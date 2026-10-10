@@ -315,7 +315,36 @@ test('proposition de collection : liste fermée, circuit et export', async () =>
   assert.strictEqual(ws.getRow(2).getCell(4).value, 'Lemax26-03');
   assert.strictEqual(ws.getRow(2).getCell(5).value, 'SugarCrush26-06');
 
+  // Feuilles prêtes à importer dans Beco : collection et tag par n° article
+  const wsColl = wb.getWorksheet('Import collections');
+  assert.strictEqual(wsColl.rowCount, 2);
+  assert.strictEqual(wsColl.getRow(2).getCell(1).value, '57913');
+  assert.strictEqual(wsColl.getRow(2).getCell(2).value, 'SugarCrush26-06');
+  const wsTags = wb.getWorksheet('Import tags');
+  assert.strictEqual(wsTags.rowCount, 2);
+  assert.strictEqual(wsTags.getRow(2).getCell(1).value, '57913');
+  assert.strictEqual(wsTags.getRow(2).getCell(2).value, 'SugarCrush26');
+
   assert.strictEqual((await fiche('57913')).propositionCollection.statut, 'traitee');
+});
+
+test('tag déduit de la collection (variantes réelles des exports ERP)', () => {
+  const { tagPourCollection } = require('../lib/export');
+  assert.strictEqual(tagPourCollection('SugarCrush26-06'), 'SugarCrush26');
+  assert.strictEqual(tagPourCollection('BouleNoël26-04'), 'BouleNoël26');
+  assert.strictEqual(tagPourCollection('Book&Bells26-Podium'), 'Book&Bells26');
+  assert.strictEqual(tagPourCollection('Textile/Cadeaux26-12'), 'Textile/Cadeaux26');
+  // Variantes sans « 26 » ou avec millésime complet
+  assert.strictEqual(tagPourCollection('Sapins artificiels'), 'Sapins artificiels26');
+  assert.strictEqual(tagPourCollection('Sapins artificiels26-00'), 'Sapins artificiels26');
+  assert.strictEqual(tagPourCollection('Art de la table'), 'Art de la table26');
+  assert.strictEqual(tagPourCollection('Fleurs Noël 2026'), 'Fleurs Noël26');
+  assert.strictEqual(tagPourCollection('Taps Noel26-01'), 'Taps Noel26');
+  // Aucun tag ne correspond : cellule vide (surlignée dans l'export)
+  assert.strictEqual(tagPourCollection('Emballages'), '');
+  assert.strictEqual(tagPourCollection('Zone - SPEL - 09'), '');
+  assert.strictEqual(tagPourCollection('textile'), '');
+  assert.strictEqual(tagPourCollection(''), '');
 });
 
 test('réimport des minimums : propositions et collections survivent', async () => {
